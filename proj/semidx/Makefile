@@ -64,7 +64,7 @@ linux/$(1):
 	@$(MAKE) -s --no-print-directory build-target TARGET=linux/$(1) \
 		TARGET_CC="$(2)" TARGET_CXX="$(3)" TARGET_EXT=so \
 		TARGET_CFLAGS="-fPIC" TARGET_SHARED="-shared" \
-		TARGET_SYSTEM_LIBS="-pthread -ldl -lm"
+		TARGET_SYSTEM_LIBS="-pthread -ldl -lm $(if $(filter armv7 armv7hf mips mipsel mips64el,$(1)),-latomic)"
 endef
 
 $(eval $(call linux_target,x86_64,gcc,g++))
