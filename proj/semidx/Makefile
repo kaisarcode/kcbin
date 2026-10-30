@@ -13,9 +13,12 @@ WINE_X86_64_CC ?= x86_64-w64-mingw32-gcc
 WINE_X86_64_CXX ?= x86_64-w64-mingw32-g++
 WASM_EMCC ?= emcc
 WASM_EMCXX ?= em++
+WASM_EMAR ?= emar
 WASM_NODE ?= node
 BUILD_VERSION ?= $(shell date +%s)
 OSXCROSS_ROOT ?= $(HOME)/.local/share/osxcross/target
+OSXCROSS_X86_64_AR := $(shell ls "$(OSXCROSS_ROOT)"/bin/x86_64-apple-darwin*-ar 2>/dev/null | sort -V | tail -n 1)
+OSXCROSS_AARCH64_AR := $(shell ls "$(OSXCROSS_ROOT)"/bin/aarch64-apple-darwin*-ar 2>/dev/null | sort -V | tail -n 1)
 ANDROID_HOME ?= $(HOME)/.local/share/android-sdk
 NDK_VERSION ?= 27.2.12479018
 NDK_BIN ?= $(ANDROID_HOME)/ndk/$(NDK_VERSION)/toolchains/llvm/prebuilt/linux-x86_64/bin
@@ -62,52 +65,53 @@ all: $(SUPPORTED_TARGETS)
 define linux_target
 linux/$(1):
 	@$(MAKE) -s --no-print-directory build-target TARGET=linux/$(1) \
-		TARGET_CC="$(2)" TARGET_CXX="$(3)" TARGET_EXT=so \
+		TARGET_CC="$(2)" TARGET_CXX="$(3)" TARGET_AR="$(4)" TARGET_EXT=so \
 		TARGET_CFLAGS="-fPIC" TARGET_SHARED="-shared" \
 		TARGET_SYSTEM_LIBS="-pthread -ldl -lm $(if $(filter armv7 armv7hf mips mipsel mips64el,$(1)),-latomic)"
 endef
 
-$(eval $(call linux_target,x86_64,gcc,g++))
-$(eval $(call linux_target,i686,i686-linux-gnu-gcc,i686-linux-gnu-g++))
-$(eval $(call linux_target,aarch64,aarch64-linux-gnu-gcc,aarch64-linux-gnu-g++))
-$(eval $(call linux_target,armv7,arm-linux-gnueabi-gcc,arm-linux-gnueabi-g++))
-$(eval $(call linux_target,armv7hf,arm-linux-gnueabihf-gcc,arm-linux-gnueabihf-g++))
-$(eval $(call linux_target,riscv64,riscv64-linux-gnu-gcc,riscv64-linux-gnu-g++))
-$(eval $(call linux_target,powerpc64le,powerpc64le-linux-gnu-gcc,powerpc64le-linux-gnu-g++))
-$(eval $(call linux_target,mips,mips-linux-gnu-gcc,mips-linux-gnu-g++))
-$(eval $(call linux_target,mipsel,mipsel-linux-gnu-gcc-13,mipsel-linux-gnu-g++-13))
-$(eval $(call linux_target,mips64el,mips64el-linux-gnuabi64-gcc,mips64el-linux-gnuabi64-g++))
-$(eval $(call linux_target,s390x,s390x-linux-gnu-gcc,s390x-linux-gnu-g++))
-$(eval $(call linux_target,loongarch64,loongarch64-linux-gnu-gcc,loongarch64-linux-gnu-g++))
+$(eval $(call linux_target,x86_64,gcc,g++,ar))
+$(eval $(call linux_target,i686,i686-linux-gnu-gcc,i686-linux-gnu-g++,i686-linux-gnu-ar))
+$(eval $(call linux_target,aarch64,aarch64-linux-gnu-gcc,aarch64-linux-gnu-g++,aarch64-linux-gnu-ar))
+$(eval $(call linux_target,armv7,arm-linux-gnueabi-gcc,arm-linux-gnueabi-g++,arm-linux-gnueabi-ar))
+$(eval $(call linux_target,armv7hf,arm-linux-gnueabihf-gcc,arm-linux-gnueabihf-g++,arm-linux-gnueabihf-ar))
+$(eval $(call linux_target,riscv64,riscv64-linux-gnu-gcc,riscv64-linux-gnu-g++,riscv64-linux-gnu-ar))
+$(eval $(call linux_target,powerpc64le,powerpc64le-linux-gnu-gcc,powerpc64le-linux-gnu-g++,powerpc64le-linux-gnu-ar))
+$(eval $(call linux_target,mips,mips-linux-gnu-gcc,mips-linux-gnu-g++,mips-linux-gnu-ar))
+$(eval $(call linux_target,mipsel,mipsel-linux-gnu-gcc-13,mipsel-linux-gnu-g++-13,mipsel-linux-gnu-ar))
+$(eval $(call linux_target,mips64el,mips64el-linux-gnuabi64-gcc,mips64el-linux-gnuabi64-g++,mips64el-linux-gnuabi64-ar))
+$(eval $(call linux_target,s390x,s390x-linux-gnu-gcc,s390x-linux-gnu-g++,s390x-linux-gnu-ar))
+$(eval $(call linux_target,loongarch64,loongarch64-linux-gnu-gcc,loongarch64-linux-gnu-g++,loongarch64-linux-gnu-ar))
 
 define windows_target
 windows/$(1):
 	@$(MAKE) -s --no-print-directory build-target TARGET=windows/$(1) \
-		TARGET_CC="$(2)" TARGET_CXX="$(3)" TARGET_EXT=dll TARGET_CFLAGS="" \
+		TARGET_CC="$(2)" TARGET_CXX="$(3)" TARGET_AR="$(4)" TARGET_EXT=dll TARGET_CFLAGS="" \
 		TARGET_SHARED="-shared -Wl,--out-implib,$(BIN_DIR)/windows/$(1)/libsemidx.dll.a" \
 		TARGET_CLI_EXT=.exe TARGET_SYSTEM_LIBS="-lm"
 endef
 
-$(eval $(call windows_target,x86_64,x86_64-w64-mingw32-gcc,x86_64-w64-mingw32-g++))
-$(eval $(call windows_target,i686,i686-w64-mingw32-gcc,i686-w64-mingw32-g++))
+$(eval $(call windows_target,x86_64,x86_64-w64-mingw32-gcc,x86_64-w64-mingw32-g++,x86_64-w64-mingw32-ar))
+$(eval $(call windows_target,i686,i686-w64-mingw32-gcc,i686-w64-mingw32-g++,i686-w64-mingw32-ar))
 
 define macos_target
 macos/$(1):
 	@$(MAKE) -s --no-print-directory build-target TARGET=macos/$(1) \
 		TARGET_CC="$(OSXCROSS_ROOT)/bin/$(2)" \
-		TARGET_CXX="$(OSXCROSS_ROOT)/bin/$(3)" TARGET_EXT=dylib \
+		TARGET_CXX="$(OSXCROSS_ROOT)/bin/$(3)" TARGET_AR="$(4)" TARGET_EXT=dylib \
 		TARGET_CFLAGS="-fPIC" TARGET_SYSTEM_LIBS="-lm" \
 		TARGET_SHARED="-dynamiclib -Wl,-install_name,@rpath/libsemidx.dylib"
 endef
 
-$(eval $(call macos_target,x86_64,o64-clang,o64-clang++))
-$(eval $(call macos_target,aarch64,oa64-clang,oa64-clang++))
+$(eval $(call macos_target,x86_64,o64-clang,o64-clang++,$(OSXCROSS_X86_64_AR)))
+$(eval $(call macos_target,aarch64,oa64-clang,oa64-clang++,$(OSXCROSS_AARCH64_AR)))
 
 define android_target
 android/$(1):
 	@$(MAKE) -s --no-print-directory build-target TARGET=android/$(1) \
 		TARGET_CC="$(NDK_BIN)/$(2)$(ANDROID_API)-clang" \
 		TARGET_CXX="$(NDK_BIN)/$(2)$(ANDROID_API)-clang++" \
+		TARGET_AR="$(NDK_BIN)/llvm-ar" \
 		TARGET_EXT=so TARGET_CFLAGS="-fPIC" TARGET_SHARED="-shared" \
 		TARGET_SYSTEM_LIBS="-ldl -lm"
 endef
@@ -118,6 +122,7 @@ $(eval $(call android_target,armv7,armv7a-linux-androideabi))
 wasm/wasm32:
 	@$(MAKE) -s --no-print-directory build-target TARGET=wasm/wasm32 \
 		TARGET_CC="$(WASM_EMCC)" TARGET_CXX="$(WASM_EMCXX)" \
+		TARGET_AR="$(WASM_EMAR)" \
 		TARGET_EXT=wasm TARGET_CFLAGS="" TARGET_SYSTEM_LIBS="-lm" \
 		TARGET_SHARED="--no-entry -sSTANDALONE_WASM=1 -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 -sEXPORTED_FUNCTIONS=_kc_semidx_build,_kc_semidx_open,_kc_semidx_save,_kc_semidx_search,_kc_semidx_count,_kc_semidx_free,_kc_semidx_close,_kc_semidx_strerror,_kc_semidx_version"
 
@@ -134,6 +139,7 @@ DEP_INCLUDES = $(addprefix -I,$(DEP_DIRS))
 DEP_LINKS = $(DEP_LIBS) $(TARGET_SYSTEM_LIBS)
 OUT_DIR = $(BIN_DIR)/$(TARGET)
 OUT_SHARED = $(OUT_DIR)/libsemidx.$(TARGET_EXT)
+OUT_STATIC = $(OUT_DIR)/libsemidx.a
 OUT_CLI = $(OUT_DIR)/semidx$(TARGET_CLI_EXT)
 OUT_OBJECT = $(BUILD_DIR)/$(TARGET)/libsemidx.o
 TARGET_PRODUCT = $(if $(filter wasm/%,$(TARGET)),$(OUT_SHARED),$(OUT_CLI))
@@ -142,14 +148,16 @@ check-deps:
 	@test -n "$(KCDIST_DIR)" || { echo "semidx: set KCDIST_DIR to the precompiled kclib distribution" >&2; exit 1; }
 	@command -v "$(TARGET_CC)" >/dev/null 2>&1 || { echo "semidx: missing target compiler $(TARGET_CC)" >&2; exit 1; }
 	@command -v "$(TARGET_CXX)" >/dev/null 2>&1 || { echo "semidx: missing target C++ linker $(TARGET_CXX)" >&2; exit 1; }
+	@command -v "$(TARGET_AR)" >/dev/null 2>&1 || { echo "semidx: missing target archiver $(TARGET_AR)" >&2; exit 1; }
 	@for path in $(DEP_LIBS) $(DEP_HEADERS); do \
 		test -f "$$path" || { echo "semidx: missing dependency for $(TARGET): $$path" >&2; exit 1; }; \
 	done
 
 build-target: check-deps
 	@mkdir -p "$(OUT_DIR)"
-	@$(MAKE) -s --no-print-directory "$(TARGET_PRODUCT)" TARGET="$(TARGET)" \
+	@$(MAKE) -s --no-print-directory "$(OUT_STATIC)" "$(TARGET_PRODUCT)" TARGET="$(TARGET)" \
 		TARGET_CC="$(TARGET_CC)" TARGET_CXX="$(TARGET_CXX)" \
+		TARGET_AR="$(TARGET_AR)" \
 		TARGET_EXT="$(TARGET_EXT)" TARGET_CLI_EXT="$(TARGET_CLI_EXT)" \
 		TARGET_CFLAGS="$(TARGET_CFLAGS)" TARGET_SHARED="$(TARGET_SHARED)" \
 		TARGET_SYSTEM_LIBS="$(TARGET_SYSTEM_LIBS)" \
@@ -161,6 +169,10 @@ $(OUT_OBJECT): src/libsemidx.c src/libsemidx.h Makefile $(DEP_HEADERS)
 	@$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror $(TARGET_CFLAGS) \
 		-DKC_SEMIDX_BUILD_VERSION=$(BUILD_VERSION) -Isrc $(DEP_INCLUDES) \
 		-c -o "$@" src/libsemidx.c
+
+$(OUT_STATIC): $(OUT_OBJECT)
+	@mkdir -p "$(OUT_DIR)"
+	@$(TARGET_AR) rcs "$@" "$<"
 
 $(OUT_SHARED): $(OUT_OBJECT) $(DEP_LIBS)
 	@mkdir -p "$(OUT_DIR)"
@@ -193,7 +205,7 @@ test:
 			-c -o "$(BUILD_DIR)/test-wasm/semidx-test.o" src/test.c || exit 1; \
 		"$(WASM_EMCXX)" -o "$(BUILD_DIR)/test-wasm/semidx-test.js" \
 			"$(BUILD_DIR)/test-wasm/semidx-test.o" \
-			"$(BUILD_DIR)/wasm/wasm32/libsemidx.o" \
+			"$(BIN_DIR)/wasm/wasm32/libsemidx.a" \
 			"$(KCDIST_DIR)/libemb.c/wasm/wasm32/libemb.a" \
 			"$(KCDIST_DIR)/libhnsw.c/wasm/wasm32/libhnsw.a" \
 			"$(KCDIST_DIR)/libmmap.c/wasm/wasm32/libmmap.a" \

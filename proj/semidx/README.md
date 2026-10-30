@@ -88,7 +88,11 @@ The distribution script publishes only semidx artifacts and metadata to the
 shared distribution root. It never compiles or copies the dependent kclibs.
 All targets link against the target-matched precompiled `libemb.a`,
 `libhnsw.a`, and `libmmap.a` from `KCDIST_DIR`; no separate kclib shared
-libraries are required at runtime. The WASM build produces `libsemidx.wasm`.
+libraries are required at runtime. Every target also produces `libsemidx.a`
+alongside its existing shared library or WASM module. This static archive
+contains semidx's C code; applications linking it must also link the three
+precompiled kclib archives, using a C++ linker for the GGML code in `libemb`.
+The WASM build produces `libsemidx.wasm` and `libsemidx.a`.
 
 ## Documentation
 
