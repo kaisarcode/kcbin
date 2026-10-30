@@ -60,4 +60,4 @@ A future general-purpose `kc` runner or package manager could resolve manifest d
 
 ## Next step
 
-Return to [Architecture](architecture.md).
+Return to the [kcbin README](../../README.md).

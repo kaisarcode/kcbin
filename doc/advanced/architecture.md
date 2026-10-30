@@ -28,4 +28,4 @@ The `kc` command is not part of kcbin's required runtime or build contract. If i
 
 ## Next step
 
-Return to the [Project catalog](../catalog.md).
+Continue with [Cross-compilation and dynamic linking](cross-compilation.md).
