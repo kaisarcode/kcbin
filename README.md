@@ -1,10 +1,10 @@
 # kcbin
 
-**Composable level-1 tools built from KaisarCode primitives**
+**Reusable tools built by composing kclibs**
 
-kcbin is a collection of free-software tools that combine independent kclibs into reusable capabilities. kclibs are level-0 (LV0) primitives; each kcbin project is a level-1 (LV1) composition and declares its LV0 dependencies explicitly.
+kcbin is a collection of free-software tools that combine independent kclibs into higher-level capabilities. Each project declares the kclibs it needs and can be built, tested, and distributed independently.
 
-Projects are individually buildable and distributable. Depending on their purpose, they may provide a command-line executable, a native shared library with an API, or a flow-based tool. kcbin is not an application framework, and it does not require the `kc` command.
+Depending on its purpose, a project may provide a command-line executable, a native shared library with an API, or a flow-based tool. kcbin is not an application framework and does not require the `kc` command.
 
 The **[Project catalog](doc/catalog.md)** lists the available tools and links to their own documentation.
 
@@ -20,20 +20,21 @@ Build or test every available project:
 For a specific project, once added:
 
 ```sh
+export KCLIB_DIST_DIR="$HOME/kclib/dist"
 ./scripts/build.sh NAME
 ./scripts/test.sh NAME
 ./scripts/dist.sh NAME
 ```
 
-Each project also defines its own `make` targets and supported platforms. See [Build and distribution](doc/build.md).
+Each project defines its own `make` targets and supported platforms. Builds use the precompiled kclibs in `KCLIB_DIST_DIR` without rebuilding them. See [Build and distribution](doc/build.md).
 
 ## Documentation
 
-- [Project catalog](doc/catalog.md) — discover the available LV1 tools.
+- [Project catalog](doc/catalog.md) — discover the available tools.
 - [Getting started](doc/getting-started.md) — add and build an independent project.
 - [Package manifests](doc/manifest.md) — declare project dependencies and metadata.
-- [Architecture](doc/advanced/architecture.md) — LV0/LV1 boundaries and composition rules.
-- [Cross-compilation](doc/advanced/cross-compilation.md) — link against precompiled LV0 artifacts for each target.
+- [Architecture](doc/advanced/architecture.md) — project boundaries and composition rules.
+- [Cross-compilation](doc/advanced/cross-compilation.md) — link against precompiled kclibs for each target.
 
 ## License
 
