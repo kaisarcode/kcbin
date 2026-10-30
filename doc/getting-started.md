@@ -1,6 +1,6 @@
 # Getting started
 
-Each kcbin tool is an independent project under `proj/`. The repository currently contains no implementation projects, so start by adding one project with a specific, reusable LV1 responsibility.
+Each kcbin tool is an independent project under `proj/`. The [semidx](../proj/semidx/README.md) project is a native library and CLI composed from existing kclibs. New projects should also provide one reusable capability.
 
 A typical native project contains:
 

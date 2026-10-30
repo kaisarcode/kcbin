@@ -1,0 +1,116 @@
+# API and CLI
+
+semidx takes an array of ID/text associations, generates embeddings internally,
+and searches the resulting index with natural-language text.
+
+## Data contract
+
+Every association contains an ID string and a content string. IDs are not keys:
+multiple entries may use the same ID and each remains independently searchable.
+The application decides which text to index, whether to split documents, and
+what an ID represents. semidx does not read source document formats.
+
+## C API
+
+```c
+#include "libsemidx.h"
+
+kc_semidx_document_t corpus[] = {
+    {"icon-laugh", "Humor, laughter and something amusing"},
+    {"icon-laugh", "Joy and a cheerful smile"},
+    {"icon-alert", "Warning, danger and caution"}
+};
+
+kc_semidx_t *index = NULL;
+int status = kc_semidx_build(&index, corpus, 3);
+if (status == KC_SEMIDX_OK) {
+    status = kc_semidx_save(index, "icons.bin");
+}
+kc_semidx_close(index);
+```
+
+To query the stored index:
+
+```c
+kc_semidx_t *index = NULL;
+kc_semidx_result_t *results = NULL;
+size_t count = 0;
+size_t limit = 5;
+double threshold = 0.4;
+kc_semidx_search_options_t options = {
+    .limit = &limit,
+    .threshold = &threshold
+};
+
+if (kc_semidx_open(&index, "icons.bin") == KC_SEMIDX_OK) {
+    if (kc_semidx_search(index, "something funny", &options,
+        &results, &count) == KC_SEMIDX_OK) {
+        for (size_t i = 0; i < count; i++) {
+            printf("%s: %.3f\n", results[i].id, results[i].score);
+        }
+        kc_semidx_free(results);
+    }
+    kc_semidx_close(index);
+}
+```
+
+The default search returns up to ten entries with a minimum cosine score of
+-1. Set limit to zero to request no results. The cosine threshold must be in
+the range -1 to 1. Results own their array, but result strings borrow storage
+from the open index. Close the index only after consuming the results.
+
+An index created with build may be searched immediately and saved. An index
+loaded with open is read-only and may be searched repeatedly.
+
+## JavaScript projection
+
+The intended JavaScript-facing shape is:
+
+```javascript
+const index = await semidx.build([
+    { id: "file-a", content: "Authentication between peers" },
+    { id: "file-a", content: "Exchanging public keys" }
+]);
+
+await index.save("corpus.bin");
+const matches = await index.search("secure peer communication", {
+    limit: 5
+});
+await index.close();
+
+const restored = await semidx.open("corpus.bin");
+const results = await restored.search("encryption");
+await restored.close();
+```
+
+This is the conceptual projection of the C API. The native project does not
+bundle a JavaScript engine or runtime-specific binding.
+
+## CLI
+
+Build reads one tab-separated pair per line from standard input or a file:
+
+```sh
+semidx build corpus.bin -i documents.tsv
+printf 'doc-1\tAuthentication between peers\n' | semidx build corpus.bin
+```
+
+The first tab separates the ID and content. Blank lines are ignored. Each
+nonblank row requires nonempty ID and content. Embedded tabs, embedded newlines,
+and binary NUL bytes are not supported by the CLI text input. The library API
+does not impose the tab-separated input representation.
+
+Search an existing binary index:
+
+```sh
+semidx search corpus.bin "peer authentication"
+semidx search corpus.bin "security" --limit 5 --threshold 0.3
+```
+
+Each output line uses the same tab delimiter with fields
+`id<TAB>score<TAB>content`. The CLI writes errors to standard error and
+exits nonzero on invalid input, incompatible indexes, or failed operations.
+
+## Next step
+
+Continue with the [Binary index](index-format.md).

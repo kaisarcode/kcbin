@@ -17,7 +17,7 @@ Build or test every available project:
 ./scripts/test.sh
 ```
 
-For a specific project, once added:
+For a specific project:
 
 ```sh
 export KCLIB_DIST_DIR="$HOME/kclib/dist"
@@ -30,12 +30,12 @@ Each project defines its own `make` targets and supported platforms. Builds use 
 
 ## Documentation
 
-- [Getting started](doc/getting-started.md) — add and build an independent project.
-- [Package manifests](doc/manifest.md) — declare project dependencies and metadata.
-- [Build and distribution](doc/build.md) — build, test, and publish projects.
-- [Project catalog](doc/catalog.md) — discover the available tools.
-- [Architecture](doc/advanced/architecture.md) — project boundaries and composition rules.
-- [Cross-compilation](doc/advanced/cross-compilation.md) — link against precompiled kclibs for each target.
+- [Getting started](doc/getting-started.md) - add and build an independent project.
+- [Package manifests](doc/manifest.md) - declare project dependencies and metadata.
+- [Build and distribution](doc/build.md) - build, test, and publish projects.
+- [Project catalog](doc/catalog.md) - discover the available tools.
+- [Architecture](doc/advanced/architecture.md) - project boundaries and composition rules.
+- [Cross-compilation](doc/advanced/cross-compilation.md) - link against precompiled kclibs for each target.
 
 ## License
 
