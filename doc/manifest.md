@@ -1,0 +1,38 @@
+# Package manifests
+
+Every kcbin project must own a source `proj/NAME/manifest.json`. It describes the package, the level of composition, and its explicit KaisarCode dependencies.
+
+A hypothetical HTTP-server project would declare:
+
+```json
+{
+  "name": "http-server",
+  "description": "Serves HTTP requests through composed networking and protocol primitives.",
+  "author": "KaisarCode",
+  "license": "GPL-3.0-only",
+  "website": "https://kaisarcode.com",
+  "repository": "https://github.com/kaisarcode/kcbin/tree/master/proj/http-server",
+  "level": 1,
+  "dependencies": ["libhttp", "libnetl"]
+}
+```
+
+This example is a proposal, not an existing project or a fixed license for future tools. Use the project's actual license and documentation when implementing it.
+
+## Dependency contract
+
+The `dependencies` array contains the logical package names of required KaisarCode components, matching the `name` field of their source manifests. For LV1 it must contain at least one LV0 kclib. All entries must resolve to lower-level packages; a dependency on another LV1 tool would raise the effective composition level and would not belong in kcbin.
+
+Use `"level": 1` for kcbin packages. The general rule is that a package's effective level equals one plus the maximum level of its KaisarCode dependencies. External toolchains and operating-system libraries are documented separately; they do not alter this hierarchy.
+
+The manifest declares direct requirements rather than copying dependent binaries into the package. Keep version pinning, compatibility, runtime lookup, and cross-platform details explicit when the corresponding package-manager contracts support them.
+
+## Publication and current support
+
+`./scripts/dist.sh NAME` reads the project's source manifest and publishes `dist/NAME/manifest.json` with an unchanged `metadata` object plus a generated `artifacts` list containing target paths and checksums. There is no repository-wide distribution manifest.
+
+The current `kc` package reader understands the existing artifact format, but **does not automatically resolve or install the new `dependencies` field**. This is declarative metadata for now. Do not claim that installation ordering, dependency checks, or runtime linkage are already enforced.
+
+## Next step
+
+Continue with [Build and distribution](build.md).
