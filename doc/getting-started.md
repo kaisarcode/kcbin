@@ -13,7 +13,7 @@ proj/NAME/
 └── src/
 ```
 
-Give the project a narrow purpose, then select the LV0 kclibs needed to implement it. Document its public API or CLI and actual link and runtime requirements in its own README. Only publish target platforms that the project builds and tests.
+Give the project a narrow purpose, then select the LV0 kclibs needed to implement it. Document its public API or CLI and actual link and runtime requirements in its own README. Consume precompiled LV0 artifacts for each target and never invoke a kclib build from the LV1 Makefile. See [Cross-compilation](advanced/cross-compilation.md). Only publish target platforms that the project builds and tests.
 
 Declare metadata and dependencies in `manifest.json`, using the [manifest guide](manifest.md). For a tool that needs two kclibs, neither kclib becomes dependent on the other: the LV1 project links or invokes both.
 

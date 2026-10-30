@@ -33,6 +33,7 @@ Each project also defines its own `make` targets and supported platforms. See [B
 - [Getting started](doc/getting-started.md) — add and build an independent project.
 - [Package manifests](doc/manifest.md) — declare project dependencies and metadata.
 - [Architecture](doc/advanced/architecture.md) — LV0/LV1 boundaries and composition rules.
+- [Cross-compilation](doc/advanced/cross-compilation.md) — link against precompiled LV0 artifacts for each target.
 
 ## License
 

@@ -29,7 +29,17 @@ Follow the kclib monorepo conventions:
 - Project build outputs belong in `proj/<name>/bin/<platform>/<arch>/`; source metadata belongs in `proj/<name>/manifest.json`.
 - `KCDIST_DIR` may select a shared distribution root; never prune packages belonging to other repositories.
 
-The scripts discover projects by `Makefile`; do not hardcode an inventory. Each project defines its own supported target matrix and link flags. Native dependencies are resolved through the build environment, not bundled into the project.
+The scripts discover projects by `Makefile`; do not hardcode an inventory. Each project defines its own supported target matrix and link flags.
+
+## Cross-compilation and linking
+
+Use the same platform/architecture names, cross-compilers, toolchains, SDKs, sysroots and output layout as the relevant kclib projects. An LV1 project declares and builds **only its own supported targets**, and should follow the corresponding kclib Makefiles for their platform configuration.
+
+**Never build, rebuild or vendor LV0 kclib sources as a side effect of a kcbin build.** Consume target-specific precompiled shared libraries and matching public headers. Build-time dependency input is the existing kclib distribution (configure its root with `KCLIB_DIST_DIR`; `KCDIST_DIR` is the separate output publication root). Require the exact `platform/arch`; missing or incompatible dependencies must fail with a clear error rather than searching host libraries, silently changing target, or falling back to static linking.
+
+Linux and Android normally link with `.so`; macOS uses `.dylib`; Windows links to `.dll.a` and needs the corresponding `.dll` at runtime. Other targets, especially iOS and WASM, require explicit confirmation that the selected kclib artifacts support the intended link/runtime model. Do not claim cross-compilation support solely because a kclib has a matching target directory.
+
+The package manifest declares dependency names, while the build selects actual target-specific artifacts. Publish only the LV1 project's own outputs; do not bundle a separate copy of each kclib dependency. Distinguish build-time library search paths from deployment-time dynamic loader resolution. A runner/package manager could arrange runtime discovery but is **not currently required or guaranteed**; see `doc/advanced/cross-compilation.md`.
 
 ## Source control and documentation
 

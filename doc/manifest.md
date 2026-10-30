@@ -25,7 +25,7 @@ The `dependencies` array contains the logical package names of required KaisarCo
 
 Use `"level": 1` for kcbin packages. The general rule is that a package's effective level equals one plus the maximum level of its KaisarCode dependencies. External toolchains and operating-system libraries are documented separately; they do not alter this hierarchy.
 
-The manifest declares direct requirements rather than copying dependent binaries into the package. Keep version pinning, compatibility, runtime lookup, and cross-platform details explicit when the corresponding package-manager contracts support them.
+The manifest declares direct requirements rather than copying dependent binaries into the package. The same dependency names are resolved to platform/architecture-specific precompiled library artifacts by the project's build and eventually by an installer. The source manifest itself does not specify a host library path or make dynamic loader resolution work. Keep version pinning, ABI compatibility, runtime lookup, and cross-platform details explicit when the corresponding package-manager contracts support them.
 
 ## Publication and current support
 
