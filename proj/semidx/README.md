@@ -55,12 +55,12 @@ Applications choose their own document boundaries and any preprocessing.
 
 ## Build
 
-Set `KCLIB_DIST_DIR` to a precompiled kclib distribution containing matching
+Set `KCDIST_DIR` to a precompiled kclib distribution containing matching
 `libemb`, `libhnsw`, and `libmmap` artifacts and headers for the target:
 
 ```sh
-KCLIB_DIST_DIR="$HOME/kclib/dist" make
-KCLIB_DIST_DIR="$HOME/kclib/dist" make test
+KCDIST_DIR="$HOME/kclib/dist" make
+KCDIST_DIR="$HOME/kclib/dist" make test
 ```
 
 Use `make all` to request the configured cross-platform targets when their

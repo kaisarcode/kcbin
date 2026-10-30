@@ -5,7 +5,7 @@
 ## Website: https://kaisarcode.com
 ## License: https://www.gnu.org/licenses/lgpl-3.0.html
 
-KCLIB_DIST_DIR ?=
+KCDIST_DIR ?=
 BIN_DIR := bin
 BUILD_VERSION ?= $(shell date +%s)
 OSXCROSS_ROOT ?= $(HOME)/.local/share/osxcross/target
@@ -103,9 +103,9 @@ endef
 $(eval $(call android_target,aarch64,aarch64-linux-android))
 $(eval $(call android_target,armv7,armv7a-linux-androideabi))
 
-DEP_EMB = $(KCLIB_DIST_DIR)/libemb.c/$(TARGET)
-DEP_HNSW = $(KCLIB_DIST_DIR)/libhnsw.c/$(TARGET)
-DEP_MMAP = $(KCLIB_DIST_DIR)/libmmap.c/$(TARGET)
+DEP_EMB = $(KCDIST_DIR)/libemb.c/$(TARGET)
+DEP_HNSW = $(KCDIST_DIR)/libhnsw.c/$(TARGET)
+DEP_MMAP = $(KCDIST_DIR)/libmmap.c/$(TARGET)
 DEP_DIRS = $(DEP_EMB) $(DEP_HNSW) $(DEP_MMAP)
 DEP_LIBS = $(DEP_EMB)/libemb.$(TARGET_EXT) \
     $(DEP_HNSW)/libhnsw.$(TARGET_EXT) \
@@ -121,7 +121,7 @@ OUT_SHARED = $(OUT_DIR)/libsemidx.$(TARGET_EXT)
 OUT_CLI = $(OUT_DIR)/semidx$(TARGET_CLI_EXT)
 
 check-deps:
-	@test -n "$(KCLIB_DIST_DIR)" || { echo "semidx: set KCLIB_DIST_DIR to the precompiled kclib distribution" >&2; exit 1; }
+	@test -n "$(KCDIST_DIR)" || { echo "semidx: set KCDIST_DIR to the precompiled kclib distribution" >&2; exit 1; }
 	@command -v "$(TARGET_CC)" >/dev/null 2>&1 || { echo "semidx: missing target compiler $(TARGET_CC)" >&2; exit 1; }
 	@for path in $(DEP_LIBS) $(DEP_HEADERS) $(if $(filter windows/%,$(TARGET)),$(DEP_IMPORTS)); do \
 		test -f "$$path" || { echo "semidx: missing dependency for $(TARGET): $$path" >&2; exit 1; }; \
@@ -133,7 +133,7 @@ build-target: check-deps
 		TARGET_CC="$(TARGET_CC)" TARGET_EXT="$(TARGET_EXT)" \
 		TARGET_CLI_EXT="$(TARGET_CLI_EXT)" TARGET_CFLAGS="$(TARGET_CFLAGS)" \
 		TARGET_SHARED="$(TARGET_SHARED)" \
-		KCLIB_DIST_DIR="$(KCLIB_DIST_DIR)" BUILD_VERSION="$(BUILD_VERSION)"
+		KCDIST_DIR="$(KCDIST_DIR)" BUILD_VERSION="$(BUILD_VERSION)"
 	@echo "OK $(TARGET)"
 
 $(OUT_SHARED): src/libsemidx.c src/libsemidx.h Makefile $(DEP_LIBS) $(DEP_HEADERS)
@@ -150,8 +150,8 @@ test:
 	@$(MAKE) --no-print-directory $(NATIVE_TARGET)
 	@$(MAKE) --no-print-directory "$(BIN_DIR)/$(NATIVE_TARGET)/semidx-test" \
 		TARGET="$(NATIVE_TARGET)" TARGET_CC="$(CC)" TARGET_EXT="$(NATIVE_EXT)"
-	@LD_LIBRARY_PATH="$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET):$(KCLIB_DIST_DIR)/libemb.c/$(NATIVE_TARGET):$(KCLIB_DIST_DIR)/libhnsw.c/$(NATIVE_TARGET):$(KCLIB_DIST_DIR)/libmmap.c/$(NATIVE_TARGET):$$LD_LIBRARY_PATH" \
-		DYLD_LIBRARY_PATH="$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET):$(KCLIB_DIST_DIR)/libemb.c/$(NATIVE_TARGET):$(KCLIB_DIST_DIR)/libhnsw.c/$(NATIVE_TARGET):$(KCLIB_DIST_DIR)/libmmap.c/$(NATIVE_TARGET):$$DYLD_LIBRARY_PATH" \
+	@LD_LIBRARY_PATH="$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET):$(KCDIST_DIR)/libemb.c/$(NATIVE_TARGET):$(KCDIST_DIR)/libhnsw.c/$(NATIVE_TARGET):$(KCDIST_DIR)/libmmap.c/$(NATIVE_TARGET):$$LD_LIBRARY_PATH" \
+		DYLD_LIBRARY_PATH="$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET):$(KCDIST_DIR)/libemb.c/$(NATIVE_TARGET):$(KCDIST_DIR)/libhnsw.c/$(NATIVE_TARGET):$(KCDIST_DIR)/libmmap.c/$(NATIVE_TARGET):$$DYLD_LIBRARY_PATH" \
 		"$(BIN_DIR)/$(NATIVE_TARGET)/semidx-test" "$(BIN_DIR)/$(NATIVE_TARGET)/index-test.bin"
 
 $(BIN_DIR)/$(TARGET)/semidx-test: src/test.c src/libsemidx.h $(BIN_DIR)/$(TARGET)/libsemidx.$(TARGET_EXT)

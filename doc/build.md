@@ -21,15 +21,15 @@ Build outputs go to `proj/NAME/bin/<platform>/<arch>/`. Individual Makefiles def
 
 Each kcbin project owns its target matrix, using the same platform/architecture naming and cross-toolchains as kclib. `make all` compiles the LV1 project's code for its supported targets; it does not build any kclib.
 
-Set `KCLIB_DIST_DIR` to the **existing** root of the precompiled kclib artifacts. For example:
+Set `KCDIST_DIR` to the shared distribution root containing the **existing** precompiled kclib artifacts. For example:
 
 ```sh
-KCLIB_DIST_DIR="$HOME/kclib/dist" ./scripts/build.sh http-server
+KCDIST_DIR="$HOME/kclib/dist" ./scripts/build.sh http-server
 ```
 
 The example uses a proposed project name; no `http-server` implementation exists yet. A project's Makefile must resolve each dependency using the requested target, for example `libhttp.c/linux/x86_64/libhttp.so` and `libhttp.c/linux/x86_64/libhttp.h`. Windows additionally needs its import library `.dll.a`. Fail when a required target-specific artifact is absent.
 
-`KCDIST_DIR` selects **where kcbin publishes its own artifacts**, independently of the input `KCLIB_DIST_DIR`. An explicitly shared destination may contain both repositories' distributions. The outputs of one project never embed independent LV0 packages. Full details: [Cross-compilation and dynamic linking](advanced/cross-compilation.md).
+`KCDIST_DIR` is used for both **reading precompiled kclib dependencies** and **publishing kcbin artifacts**. The shared directory may contain packages from both repositories. The outputs of one project never embed independent LV0 packages. Full details: [Cross-compilation and dynamic linking](advanced/cross-compilation.md).
 
 ## Distribution
 

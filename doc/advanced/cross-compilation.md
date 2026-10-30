@@ -20,15 +20,15 @@ This is **the set of recognized kclib targets, not a claim that every kcbin tool
 
 ## Precompiled dependencies
 
-Point `KCLIB_DIST_DIR` at an existing kclib distribution root. It contains the published per-project manifests, shared libraries, import libraries where applicable, and public headers for each target.
+Point `KCDIST_DIR` at an existing kclib distribution root. It contains the published per-project manifests, shared libraries, import libraries where applicable, and public headers for each target.
 
 For a hypothetical `http-server` composition targeting `linux/x86_64`, the needed inputs include:
 
 ```text
-$KCLIB_DIST_DIR/libhttp.c/linux/x86_64/libhttp.so
-$KCLIB_DIST_DIR/libhttp.c/linux/x86_64/libhttp.h
-$KCLIB_DIST_DIR/libnetl.c/linux/x86_64/libnetl.so
-$KCLIB_DIST_DIR/libnetl.c/linux/x86_64/libnetl.h
+$KCDIST_DIR/libhttp.c/linux/x86_64/libhttp.so
+$KCDIST_DIR/libhttp.c/linux/x86_64/libhttp.h
+$KCDIST_DIR/libnetl.c/linux/x86_64/libnetl.so
+$KCDIST_DIR/libnetl.c/linux/x86_64/libnetl.h
 ```
 
 A Windows build typically uses `libhttp.dll.a` and `libnetl.dll.a` at link time, and the corresponding `.dll` files at runtime. For macOS the shared artifact is generally `.dylib`. Android commonly uses `.so`. For iOS and iOS Simulator, packaging/signing and loader restrictions require an explicitly supported deployment model. The current WASM output is not a drop-in native shared library; do not use ordinary ELF/PE/Mach-O dynamic-link assumptions for `wasm/wasm32`.
@@ -48,7 +48,7 @@ These paths are examples, not files already built.
 
 The project's `manifest.json` declares its dependencies by their logical package names (for example `libhttp` and `libnetl`). The published artifact manifest provides the LV1 package's own files and their checksums. **Do not duplicate dependent kclib shared libraries in the LV1 package.**
 
-`KCLIB_DIST_DIR` is the **input** root for precompiled LV0 dependencies. `KCDIST_DIR` is the optional **output** root used by `scripts/dist.sh`; it can be configured to a shared distribution but does not implicitly build or resolve LV0.
+`KCDIST_DIR` is the shared root for both precompiled LV0 dependency input and kcbin publication output. Builds use only existing target-specific artifacts; `scripts/dist.sh` publishes the LV1 project's outputs without building or altering LV0 packages.
 
 ## Runtime discovery
 

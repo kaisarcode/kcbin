@@ -20,13 +20,13 @@ Build or test every available project:
 For a specific project:
 
 ```sh
-export KCLIB_DIST_DIR="$HOME/kclib/dist"
+export KCDIST_DIR="$HOME/kclib/dist"
 ./scripts/build.sh NAME
 ./scripts/test.sh NAME
 ./scripts/dist.sh NAME
 ```
 
-Each project defines its own `make` targets and supported platforms. Builds use the precompiled kclibs in `KCLIB_DIST_DIR` without rebuilding them. See [Build and distribution](doc/build.md).
+Each project defines its own `make` targets and supported platforms. Builds use the precompiled kclibs in `KCDIST_DIR` without rebuilding them. See [Build and distribution](doc/build.md).
 
 ## Documentation
 
