@@ -10,6 +10,7 @@
 #include "libsemidx.h"
 
 #include <errno.h>
+#include <inttypes.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
