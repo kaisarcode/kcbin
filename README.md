@@ -42,4 +42,4 @@ Each project defines its own `make` targets and supported platforms. Builds use 
 [![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0.html)
 
 kcbin is distributed under the **GNU General Public License version 3 (GPLv3)** for its repository infrastructure and root tooling.
-Each nested project retains its own license, as documented in that project's README and license file.
+All projects under `proj/` are distributed under the **GNU Lesser General Public License version 3 (LGPLv3)**, independently of the GPLv3 license of the repository infrastructure.

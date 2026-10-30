@@ -13,7 +13,7 @@ kcbin is the KaisarCode monorepo for **level-1 (LV1) composable tools**. Each pr
 
 ## Project structure
 
-Each independently distributable project owns its `README.md`, `Makefile`, `manifest.json`, `src/`, tests, and applicable `LICENSE`. Use `doc/` only when the project requires more documentation. A project may provide a native CLI, shared library, or both, without an obligatory common API.
+Each independently distributable project owns its `README.md`, `Makefile`, `manifest.json`, `src/`, tests, and LGPLv3 license files (`LICENSE` with the LGPLv3 text and `COPYING` with the accompanying GPLv3 text, matching kclib project conventions). Use `doc/` only when the project requires more documentation. A project may provide a native CLI, shared library, or both, without an obligatory common API.
 
 Source metadata fields are `name`, `description`, `author`, `license`, `website`, `repository`, `level`, and `dependencies`. For LV1, use `"level": 1` and a nonempty `"dependencies"` array of names identifying LV0 kclibs. See `doc/manifest.md`. The distribution script retains source metadata and adds built artifact hashes. The current project-manifest consumer does not yet install declared dependencies automatically; never claim it does.
 
@@ -43,7 +43,7 @@ The package manifest declares dependency names, while the build selects actual t
 
 ## Source control and documentation
 
-Use the branch selected by the user; do not create branches, tags, or refs without a request. Keep root ignore patterns at the monorepo root. Preserve the existing repository-level GPLv3 license and each project's own license.
+Use the branch selected by the user; do not create branches, tags, or refs without a request. Keep root ignore patterns at the monorepo root. The repository root infrastructure and root tooling are GPLv3; **all** projects under `proj/` are LGPLv3, use `"license": "LGPL-3.0-only"` in their source manifests, and document LGPLv3 in their project READMEs. Do not inherit the repository's GPLv3 license for a nested project.
 
 Keep `README.md` focused on first use; put longer architecture and build details under `doc/`. The canonical project inventory is `doc/catalog.md`, linking to self-contained project README files. Do not create placeholder packages solely to fill the catalog.
 

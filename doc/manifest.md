@@ -9,7 +9,7 @@ A hypothetical HTTP-server project would declare:
   "name": "http-server",
   "description": "Serves HTTP requests through composed networking and protocol primitives.",
   "author": "KaisarCode",
-  "license": "GPL-3.0-only",
+  "license": "LGPL-3.0-only",
   "website": "https://kaisarcode.com",
   "repository": "https://github.com/kaisarcode/kcbin/tree/master/proj/http-server",
   "level": 1,
@@ -17,7 +17,7 @@ A hypothetical HTTP-server project would declare:
 }
 ```
 
-This example is a proposal, not an existing project or a fixed license for future tools. Use the project's actual license and documentation when implementing it.
+This example is a proposal, not an existing project. The `license` field is **LGPL-3.0-only** for every kcbin project, just as for kclibs. Only the kcbin repository infrastructure and root tooling use GPLv3. Each project's `LICENSE` contains the LGPLv3 license text, and its `COPYING` contains the GPLv3 text incorporated by the LGPLv3 license, following the kclib convention.
 
 ## Dependency contract
 

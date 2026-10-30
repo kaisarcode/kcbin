@@ -12,7 +12,7 @@ For a project P with KaisarCode dependencies D, its effective level is `1 + max(
 
 ## Project boundaries
 
-Each project under `proj/` has one reusable responsibility, its own README and license, and a project-local source manifest with dependencies. A higher-level tool may expose a CLI, a library API, a long-lived service, or a flow recipe. No universal server runtime or framework is required.
+Each project under `proj/` has one reusable responsibility, its own README and LGPLv3 license files (`LICENSE` and `COPYING`), and a project-local source manifest with dependencies. The monorepo infrastructure and root tooling remain GPLv3; individual project manifests declare `LGPL-3.0-only`. A higher-level tool may expose a CLI, a library API, a long-lived service, or a flow recipe. No universal server runtime or framework is required.
 
 Keep network transport, message protocol, TLS, rendering, persistence, and application policy in their existing owner components. Compose only the operations the LV1 contract needs. Do not hide or duplicate primitive responsibilities inside the composition merely for convenience.
 
