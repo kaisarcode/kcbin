@@ -21,7 +21,11 @@
 #define KC_TEST_NULL "/dev/null"
 #endif
 
+#ifdef __EMSCRIPTEN__
+static int semidx_test_total = 3;
+#else
 static int semidx_test_total = 4;
+#endif
 static int semidx_test_current = 0;
 
 /**
@@ -180,6 +184,7 @@ static int semidx_test_errors(void)
         "rejects invalid records and corrupted indexes", failed);
 }
 
+#ifndef __EMSCRIPTEN__
 /**
  * Check that the CLI builds and searches tab-separated associations.
  * @return Zero when the CLI contract works, one otherwise.
@@ -246,6 +251,8 @@ static int semidx_test_cli(void)
         "builds and queries tab-separated text without a JSON parser", failed);
 }
 
+#endif
+
 /**
  * Run one named test and accumulate its result.
  * @param name Selected contract case name.
@@ -263,9 +270,11 @@ static int semidx_run_case(const char *name)
     if (strcmp(name, "invalid_inputs") == 0) {
         return semidx_test_errors();
     }
+#ifndef __EMSCRIPTEN__
     if (strcmp(name, "semidx_cli") == 0) {
         return semidx_test_cli();
     }
+#endif
     fprintf(stderr, "unknown test case: %s\n", name);
     return 2;
 }
@@ -282,7 +291,9 @@ int main(int argc, char **argv)
         "build_and_search",
         "binary_roundtrip",
         "invalid_inputs",
-        "semidx_cli"
+#ifndef __EMSCRIPTEN__
+        "semidx_cli",
+#endif
     };
     int failed = 0;
 

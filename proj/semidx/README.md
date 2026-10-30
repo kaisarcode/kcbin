@@ -64,12 +64,15 @@ make
 make test
 make all
 make test wine
+make test wasm
 ```
 
 The default `make` builds the native target. `make all` builds the supported
-cross-compilation targets; `make test wine` runs Windows contract tests through
-Wine after the Windows target has been built. The project keeps test binaries
-in `.build/`, outside the distributable `bin/` tree.
+cross-compilation targets, including `wasm/wasm32` with Emscripten.
+`make test wine` runs Windows contract tests through Wine after the Windows
+target has been built; `make test wasm` runs the library contract tests with
+Emscripten and Node.js. The project keeps test binaries in `.build/`,
+outside the distributable `bin/` tree.
 
 From the kcbin repository root, use the standard build, test, and distribution
 scripts to generate artifact checksums and publish the project:
@@ -83,7 +86,9 @@ export KCDIST_DIR="$HOME/kclib/dist"
 
 The distribution script publishes only semidx artifacts and metadata to the
 shared distribution root. It never compiles or copies the dependent kclibs.
-Runtime linking must locate those shared libraries independently.
+All targets link against the target-matched precompiled `libemb.a`,
+`libhnsw.a`, and `libmmap.a` from `KCDIST_DIR`; no separate kclib shared
+libraries are required at runtime. The WASM build produces `libsemidx.wasm`.
 
 ## Documentation
 

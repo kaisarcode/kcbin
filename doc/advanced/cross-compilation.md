@@ -1,6 +1,6 @@
-# Cross-compilation and dynamic linking
+# Cross-compilation and linking
 
-kcbin uses the cross-compilation conventions of kclib while compiling **only the level-1 composition**. Its level-0 kclib dependencies are already compiled and are not vendored, rebuilt, or copied into kcbin's source tree.
+kcbin uses the cross-compilation conventions of kclib while compiling **only the level-1 composition**. Its level-0 kclib dependencies are already compiled and are not vendored, rebuilt, or copied into kcbin's source tree. Each project explicitly selects static or dynamic linking for its target.
 
 ## Platform and architecture matrix
 
@@ -20,7 +20,7 @@ This is **the set of recognized kclib targets, not a claim that every kcbin tool
 
 ## Precompiled dependencies
 
-Point `KCDIST_DIR` at an existing kclib distribution root. It contains the published per-project manifests, shared libraries, import libraries where applicable, and public headers for each target.
+Point `KCDIST_DIR` at an existing kclib distribution root. It contains the published per-project manifests, static and shared libraries, import libraries where applicable, and public headers for each target.
 
 For a hypothetical `http-server` composition targeting `linux/x86_64`, the needed inputs include:
 
@@ -31,9 +31,9 @@ $KCDIST_DIR/libnetl.c/linux/x86_64/libnetl.so
 $KCDIST_DIR/libnetl.c/linux/x86_64/libnetl.h
 ```
 
-A Windows build typically uses `libhttp.dll.a` and `libnetl.dll.a` at link time, and the corresponding `.dll` files at runtime. For macOS the shared artifact is generally `.dylib`. Android commonly uses `.so`. For iOS and iOS Simulator, packaging/signing and loader restrictions require an explicitly supported deployment model. The current WASM output is not a drop-in native shared library; do not use ordinary ELF/PE/Mach-O dynamic-link assumptions for `wasm/wasm32`.
+A dynamically linked Windows build typically uses `libhttp.dll.a` and `libnetl.dll.a` at link time, and the corresponding `.dll` files at runtime. For macOS the dynamic library is generally `.dylib`. Android commonly uses `.so`. Static compositions instead link the matching target's `.a` archives. Emscripten `wasm/wasm32` archives contain WASM-compatible object files, and its `.so` files are side modules rather than native ELF/PE/Mach-O shared libraries. For iOS and iOS Simulator, packaging/signing and loader restrictions require an explicitly supported deployment model.
 
-Treat the library header and binary as one compatible interface. Confirm the ABI, compiler target, and any platform-specific link requirements. Do not link a target against host libraries or silently switch from shared to static linking. If the exact target's artifacts are absent, fail and identify the missing package and target.
+Treat the library header and binary as one compatible interface. Confirm the ABI, compiler target, and any platform-specific link requirements. Do not link a target against host libraries or silently switch between static and dynamic linking. If the exact target's artifacts are absent, fail and identify the missing package and target.
 
 ## LV1 build and publication
 
@@ -46,13 +46,13 @@ proj/http-server/bin/windows/x86_64/http-server.exe
 
 These paths are examples, not files already built.
 
-The project's `manifest.json` declares its dependencies by their logical package names (for example `libhttp` and `libnetl`). The published artifact manifest provides the LV1 package's own files and their checksums. **Do not duplicate dependent kclib shared libraries in the LV1 package.**
+The project's `manifest.json` declares its dependencies by their logical package names (for example `libhttp` and `libnetl`). The published artifact manifest provides the LV1 package's own files and their checksums. **Do not duplicate dependent kclib artifacts in the LV1 package.**
 
 `KCDIST_DIR` is the shared root for both precompiled LV0 dependency input and kcbin publication output. Builds use only existing target-specific artifacts; `scripts/dist.sh` publishes the LV1 project's outputs without building or altering LV0 packages.
 
 ## Runtime discovery
 
-Link-time success does not make an installed program runnable. A shared library may live in a separate package directory from the consuming executable.
+Link-time success does not make a dynamically linked installed program runnable. A shared library may live in a separate package directory from the consuming executable. Static compositions such as `semidx` incorporate the required kclib object code at link time and do not need separate kclib shared libraries at runtime.
 
 On Linux, the executable may need a suitable relative RPATH/RUNPATH or a launcher-configured library search path. On macOS, loader paths and any signing requirements need to be satisfied. On Windows, the installed DLL directory must be in the executable's permitted DLL search locations. Android and Apple mobile targets have additional packaging restrictions.
 
