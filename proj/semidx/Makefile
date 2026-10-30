@@ -138,12 +138,12 @@ build-target: check-deps
 
 $(OUT_SHARED): src/libsemidx.c src/libsemidx.h Makefile $(DEP_LIBS) $(DEP_HEADERS)
 	@mkdir -p "$(OUT_DIR)"
-	$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror $(TARGET_CFLAGS) \
+	@$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror $(TARGET_CFLAGS) \
 		-DKC_SEMIDX_BUILD_VERSION=$(BUILD_VERSION) -Isrc $(DEP_INCLUDES) \
 		$(TARGET_SHARED) -o "$@" src/libsemidx.c $(DEP_LINKS)
 
 $(OUT_CLI): src/semidx.c src/libsemidx.h $(OUT_SHARED)
-	$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
+	@$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
 		-o "$@" src/semidx.c -L"$(OUT_DIR)" -lsemidx $(DEP_LINKS)
 
 test:
@@ -155,8 +155,9 @@ test:
 		"$(BIN_DIR)/$(NATIVE_TARGET)/semidx-test" "$(BIN_DIR)/$(NATIVE_TARGET)/index-test.bin"
 
 $(BIN_DIR)/$(TARGET)/semidx-test: src/test.c src/libsemidx.h $(BIN_DIR)/$(TARGET)/libsemidx.$(TARGET_EXT)
-	$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
+	@$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
 		-o "$@" src/test.c -L"$(BIN_DIR)/$(TARGET)" -lsemidx $(DEP_LINKS)
 
 clean:
-	rm -rf "$(BIN_DIR)"
+	@rm -rf "$(BIN_DIR)"
+	@echo "OK clean"
