@@ -59,14 +59,31 @@ Set `KCDIST_DIR` to a precompiled kclib distribution containing matching
 `libemb`, `libhnsw`, and `libmmap` artifacts and headers for the target:
 
 ```sh
-KCDIST_DIR="$HOME/kclib/dist" make
-KCDIST_DIR="$HOME/kclib/dist" make test
+export KCDIST_DIR="$HOME/kclib/dist"
+make
+make test
+make all
+make test wine
 ```
 
-Use `make all` to request the configured cross-platform targets when their
-toolchains and matching shared dependencies are available. semidx never
-compiles or downloads kclibs. Runtime linking must locate those shared
-libraries independently.
+The default `make` builds the native target. `make all` builds the supported
+cross-compilation targets; `make test wine` runs Windows contract tests through
+Wine after the Windows target has been built. The project keeps test binaries
+in `.build/`, outside the distributable `bin/` tree.
+
+From the kcbin repository root, use the standard build, test, and distribution
+scripts to generate artifact checksums and publish the project:
+
+```sh
+export KCDIST_DIR="$HOME/kclib/dist"
+./scripts/build.sh semidx
+./scripts/test.sh semidx
+./scripts/dist.sh semidx
+```
+
+The distribution script publishes only semidx artifacts and metadata to the
+shared distribution root. It never compiles or copies the dependent kclibs.
+Runtime linking must locate those shared libraries independently.
 
 ## Documentation
 

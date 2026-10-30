@@ -13,15 +13,33 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#define KC_TEST_CLI ".\\semidx.exe"
+#define KC_TEST_NULL "NUL"
+#else
+#define KC_TEST_CLI "./semidx"
+#define KC_TEST_NULL "/dev/null"
+#endif
+
+static int semidx_test_total = 4;
+static int semidx_test_current = 0;
+
 /**
- * Print a named test outcome and return its failure count.
- * @param name Public test case name.
- * @param failed Nonzero when the test failed.
- * @return Zero for a pass, one for a failure.
+ * Print a numbered contract test result and its behavior.
+ * @param name Name of the public contract case.
+ * @param detail Behavior exercised by the test.
+ * @param failed Nonzero when the case failed.
+ * @return Zero on success, one on failure.
  */
-static int semidx_test_result(const char *name, int failed)
+static int semidx_test_result(
+    const char *name,
+    const char *detail,
+    int failed
+)
 {
-    printf("[%s] %s\n", failed ? "FAIL" : "PASS", name);
+    printf("[%d/%d] [%s] %s: %s\n",
+        semidx_test_current, semidx_test_total,
+        failed ? "FAIL" : "PASS", name, detail);
     return failed ? 1 : 0;
 }
 
@@ -56,23 +74,26 @@ static int semidx_test_build(void)
         ) != KC_SEMIDX_OK;
         failed |= result_count != 3;
         for (size_t i = 0; i < result_count; i++) {
-            repeated += strcmp(results[i].id, "document") == 0;
-            failed |= results[i].content == NULL;
+            failed |= results[i].id == NULL || results[i].content == NULL;
+            if (results[i].id != NULL) {
+                repeated += strcmp(results[i].id, "document") == 0;
+            }
         }
         failed |= repeated != 2;
     }
     kc_semidx_free(results);
     kc_semidx_close(index);
-    return semidx_test_result("build_and_search", failed);
+    return semidx_test_result("build_and_search",
+        "preserves repeated IDs and ranks distinct records", failed);
 }
 
 /**
  * Test the index file round-trip without the original corpus.
- * @param path Writable test file path.
  * @return Zero when all checks succeed, one otherwise.
  */
-static int semidx_test_persistence(const char *path)
+static int semidx_test_persistence(void)
 {
+    const char *path = "semidx-test-index.bin";
     const kc_semidx_document_t corpus[] = {
         {"laugh", "A smile, laughter and something funny"},
         {"file", "A serious technical document"}
@@ -108,16 +129,17 @@ static int semidx_test_persistence(const char *path)
     kc_semidx_close(built);
     kc_semidx_close(opened);
     remove(path);
-    return semidx_test_result("binary_roundtrip", failed);
+    return semidx_test_result("binary_roundtrip",
+        "restores associations without re-embedding", failed);
 }
 
 /**
  * Test invalid input, corrupted binaries and an empty corpus.
- * @param path Writable test file path.
  * @return Zero when all checks succeed, one otherwise.
  */
-static int semidx_test_errors(const char *path)
+static int semidx_test_errors(void)
 {
+    const char *path = "semidx-test-index.bin";
     const kc_semidx_document_t invalid[] = {{NULL, "text"}};
     kc_semidx_t *index = NULL;
     kc_semidx_t *opened = NULL;
@@ -154,25 +176,128 @@ static int semidx_test_errors(const char *path)
     }
     kc_semidx_close(opened);
     remove(path);
-    return semidx_test_result("invalid_inputs", failed);
+    return semidx_test_result("invalid_inputs",
+        "rejects invalid records and corrupted indexes", failed);
 }
 
 /**
- * Run the public semantic index contract tests.
- * @param argc Command-line argument count.
- * @param argv Command-line arguments containing one temporary file path.
- * @return Process exit status.
+ * Check that the CLI builds and searches tab-separated associations.
+ * @return Zero when the CLI contract works, one otherwise.
+ */
+static int semidx_test_cli(void)
+{
+    FILE *file;
+    char line[4096];
+    int failed = 0;
+    int rows = 0;
+    int found_security = 0;
+    int found_storage = 0;
+
+    file = fopen("semidx-cli-input.tsv", "wb");
+    if (file == NULL) {
+        failed = 1;
+    } else {
+        failed |= fputs(
+            "shared\tAuthentication and encrypted peer communication\n",
+            file
+        ) == EOF;
+        failed |= fputs(
+            "shared\tStoring files and indexing documents\n",
+            file
+        ) == EOF;
+        failed |= fclose(file) != 0;
+    }
+    failed |= system(
+        KC_TEST_CLI " -h > " KC_TEST_NULL " 2>&1"
+    ) != 0;
+    failed |= system(
+        KC_TEST_CLI " -v > " KC_TEST_NULL " 2>&1"
+    ) != 0;
+    if (!failed) {
+        failed |= system(
+            KC_TEST_CLI " build semidx-cli-index.bin -i "
+            "semidx-cli-input.tsv > " KC_TEST_NULL " 2>&1"
+        ) != 0;
+    }
+    if (!failed) {
+        failed |= system(
+            KC_TEST_CLI " search semidx-cli-index.bin "
+            "security -l 2 > semidx-cli-output.tsv 2>&1"
+        ) != 0;
+    }
+    file = fopen("semidx-cli-output.tsv", "rb");
+    if (file != NULL) {
+        while (fgets(line, sizeof(line), file) != NULL) {
+            rows++;
+            failed |= strncmp(line, "shared\t", 7) != 0;
+            found_security |= strstr(line, "encrypted peer") != NULL;
+            found_storage |= strstr(line, "indexing documents") != NULL;
+        }
+        failed |= fclose(file) != 0;
+    } else {
+        failed = 1;
+    }
+    failed |= rows != 2 || !found_security || !found_storage;
+
+    remove("semidx-cli-input.tsv");
+    remove("semidx-cli-index.bin");
+    remove("semidx-cli-output.tsv");
+    return semidx_test_result("semidx_cli",
+        "builds and queries tab-separated text without a JSON parser", failed);
+}
+
+/**
+ * Run one named test and accumulate its result.
+ * @param name Selected contract case name.
+ * @return Zero when the selected test succeeds, one or two otherwise.
+ */
+static int semidx_run_case(const char *name)
+{
+    semidx_test_current++;
+    if (strcmp(name, "build_and_search") == 0) {
+        return semidx_test_build();
+    }
+    if (strcmp(name, "binary_roundtrip") == 0) {
+        return semidx_test_persistence();
+    }
+    if (strcmp(name, "invalid_inputs") == 0) {
+        return semidx_test_errors();
+    }
+    if (strcmp(name, "semidx_cli") == 0) {
+        return semidx_test_cli();
+    }
+    fprintf(stderr, "unknown test case: %s\n", name);
+    return 2;
+}
+
+/**
+ * Run all public contract cases or one selected case.
+ * @param argc Argument count.
+ * @param argv Argument vector with case name or all.
+ * @return Process status, zero on success.
  */
 int main(int argc, char **argv)
 {
+    const char *cases[] = {
+        "build_and_search",
+        "binary_roundtrip",
+        "invalid_inputs",
+        "semidx_cli"
+    };
     int failed = 0;
 
     if (argc != 2) {
-        fprintf(stderr, "Usage: semidx-test <temporary-index-file>\n");
-        return 1;
+        fprintf(stderr, "test case: expected one argument\n");
+        return 2;
     }
-    failed += semidx_test_build();
-    failed += semidx_test_persistence(argv[1]);
-    failed += semidx_test_errors(argv[1]);
-    return failed == 0 ? 0 : 1;
+    if (strcmp(argv[1], "all") == 0) {
+        for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+            failed += semidx_run_case(cases[i]);
+        }
+        printf("%d passed, %d failed\n",
+            semidx_test_total - failed, failed);
+        return failed == 0 ? 0 : 1;
+    }
+    semidx_test_total = 1;
+    return semidx_run_case(argv[1]);
 }

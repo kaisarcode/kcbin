@@ -7,6 +7,10 @@
 
 KCDIST_DIR ?=
 BIN_DIR := bin
+BUILD_DIR := .build
+WINE ?= wine
+WINE_X86_64_CC ?= x86_64-w64-mingw32-gcc
+WINE_X86_64_CXX ?= x86_64-w64-mingw32-g++
 BUILD_VERSION ?= $(shell date +%s)
 OSXCROSS_ROOT ?= $(HOME)/.local/share/osxcross/target
 ANDROID_HOME ?= $(HOME)/.local/share/android-sdk
@@ -47,7 +51,7 @@ SUPPORTED_TARGETS := $(LINUX_TARGETS) $(WINDOWS_TARGETS) \
     $(MACOS_TARGETS) $(ANDROID_TARGETS)
 
 .DEFAULT_GOAL := $(NATIVE_TARGET)
-.PHONY: all test clean build-target check-deps $(SUPPORTED_TARGETS)
+.PHONY: all test wine clean build-target check-deps $(SUPPORTED_TARGETS)
 
 all: $(SUPPORTED_TARGETS)
 
@@ -146,18 +150,78 @@ $(OUT_CLI): src/semidx.c src/libsemidx.h $(OUT_SHARED)
 	@$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
 		-o "$@" src/semidx.c -L"$(OUT_DIR)" -lsemidx $(DEP_LINKS)
 
-test:
-	@$(MAKE) --no-print-directory $(NATIVE_TARGET)
-	@$(MAKE) --no-print-directory "$(BIN_DIR)/$(NATIVE_TARGET)/semidx-test" \
-		TARGET="$(NATIVE_TARGET)" TARGET_CC="$(CC)" TARGET_EXT="$(NATIVE_EXT)"
-	@LD_LIBRARY_PATH="$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET):$(KCDIST_DIR)/libemb.c/$(NATIVE_TARGET):$(KCDIST_DIR)/libhnsw.c/$(NATIVE_TARGET):$(KCDIST_DIR)/libmmap.c/$(NATIVE_TARGET):$$LD_LIBRARY_PATH" \
-		DYLD_LIBRARY_PATH="$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET):$(KCDIST_DIR)/libemb.c/$(NATIVE_TARGET):$(KCDIST_DIR)/libhnsw.c/$(NATIVE_TARGET):$(KCDIST_DIR)/libmmap.c/$(NATIVE_TARGET):$$DYLD_LIBRARY_PATH" \
-		"$(BIN_DIR)/$(NATIVE_TARGET)/semidx-test" "$(BIN_DIR)/$(NATIVE_TARGET)/index-test.bin"
+NATIVE_DEP_LINKS = -L"$(KCDIST_DIR)/libemb.c/$(NATIVE_TARGET)" \
+    -L"$(KCDIST_DIR)/libhnsw.c/$(NATIVE_TARGET)" \
+    -L"$(KCDIST_DIR)/libmmap.c/$(NATIVE_TARGET)" \
+    -lemb -lhnsw -lmmap -lm
 
-$(BIN_DIR)/$(TARGET)/semidx-test: src/test.c src/libsemidx.h $(BIN_DIR)/$(TARGET)/libsemidx.$(TARGET_EXT)
-	@$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
-		-o "$@" src/test.c -L"$(BIN_DIR)/$(TARGET)" -lsemidx $(DEP_LINKS)
+$(BUILD_DIR)/test/semidx-test: src/test.c src/libsemidx.h $(BIN_DIR)/$(NATIVE_TARGET)/libsemidx.$(NATIVE_EXT)
+	@mkdir -p "$(BUILD_DIR)/test"
+	@$(CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
+		-o "$@" src/test.c -L"$(BIN_DIR)/$(NATIVE_TARGET)" \
+		-lsemidx $(NATIVE_DEP_LINKS)
+
+test:
+	@if [ -n "$(filter wine,$(MAKECMDGOALS))" ]; then \
+		if ! command -v "$(WINE)" >/dev/null 2>&1; then \
+			echo "Missing Wine runtime: $(WINE)" >&2; exit 1; \
+		fi; \
+		if ! command -v "$(WINE_X86_64_CC)" >/dev/null 2>&1 || \
+			! command -v "$(WINE_X86_64_CXX)" >/dev/null 2>&1; then \
+			echo "Missing Windows cross-compilers" >&2; exit 1; \
+		fi; \
+		for file in libsemidx.dll libsemidx.dll.a semidx.exe; do \
+			if [ ! -f "$(BIN_DIR)/windows/x86_64/$$file" ]; then \
+				echo "Missing Windows artifact: $$file; run make windows/x86_64" >&2; \
+				exit 1; \
+			fi; \
+		done; \
+		mkdir -p "$(BUILD_DIR)/test-wine" || exit 1; \
+		"$(WINE_X86_64_CC)" -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
+			-o "$(BUILD_DIR)/test-wine/semidx-test.exe" src/test.c \
+			-L"$(BIN_DIR)/windows/x86_64" -lsemidx \
+			-L"$(KCDIST_DIR)/libemb.c/windows/x86_64" \
+			-L"$(KCDIST_DIR)/libhnsw.c/windows/x86_64" \
+			-L"$(KCDIST_DIR)/libmmap.c/windows/x86_64" \
+			-lemb -lhnsw -lmmap -lm || exit 1; \
+		cp "$(BIN_DIR)/windows/x86_64/libsemidx.dll" \
+			"$(BIN_DIR)/windows/x86_64/semidx.exe" \
+			"$(BUILD_DIR)/test-wine/" || exit 1; \
+		for dep in libemb libhnsw libmmap; do \
+			file="$(KCDIST_DIR)/$$dep.c/windows/x86_64/$$dep.dll"; \
+			if [ ! -f "$$file" ]; then \
+				echo "Missing Windows runtime dependency: $$file" >&2; exit 1; \
+			fi; \
+			cp "$$file" "$(BUILD_DIR)/test-wine/" || exit 1; \
+		done; \
+		for dll in \
+			"$$($(WINE_X86_64_CC) -print-file-name=libgcc_s_seh-1.dll)" \
+			"$$($(WINE_X86_64_CXX) -print-file-name=libstdc++-6.dll)" \
+			"$$($(WINE_X86_64_CXX) -print-file-name=libwinpthread-1.dll)"; do \
+			if [ -f "$$dll" ]; then \
+				cp "$$dll" "$(BUILD_DIR)/test-wine/" || exit 1; \
+			fi; \
+		done; \
+		(cd "$(BUILD_DIR)/test-wine" && \
+			EGL_LOG_LEVEL=fatal WINEDEBUG=-all "$(WINE)" semidx-test.exe all); \
+	else \
+		$(MAKE) --no-print-directory $(NATIVE_TARGET) || exit 1; \
+		$(MAKE) --no-print-directory "$(BUILD_DIR)/test/semidx-test" || exit 1; \
+		cp "$(BIN_DIR)/$(NATIVE_TARGET)/semidx$(TARGET_CLI_EXT)" \
+			"$(BUILD_DIR)/test/" || exit 1; \
+		(cd "$(BUILD_DIR)/test" && \
+			LD_LIBRARY_PATH="$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET):$(KCDIST_DIR)/libemb.c/$(NATIVE_TARGET):$(KCDIST_DIR)/libhnsw.c/$(NATIVE_TARGET):$(KCDIST_DIR)/libmmap.c/$(NATIVE_TARGET):$$LD_LIBRARY_PATH" \
+			DYLD_LIBRARY_PATH="$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET):$(KCDIST_DIR)/libemb.c/$(NATIVE_TARGET):$(KCDIST_DIR)/libhnsw.c/$(NATIVE_TARGET):$(KCDIST_DIR)/libmmap.c/$(NATIVE_TARGET):$$DYLD_LIBRARY_PATH" \
+			./semidx-test all); \
+	fi
+
+wine:
+	@if [ -z "$(filter test,$(MAKECMDGOALS))" ]; then \
+		echo "Use 'make test wine' to run tests through Wine." >&2; \
+		exit 1; \
+	fi
+	@:
 
 clean:
-	@rm -rf "$(BIN_DIR)"
+	@rm -rf "$(BIN_DIR)" "$(BUILD_DIR)"
 	@echo "OK clean"
