@@ -144,7 +144,7 @@ $(OUT_SHARED): src/libsemidx.c src/libsemidx.h Makefile $(DEP_LIBS) $(DEP_HEADER
 
 $(OUT_CLI): src/semidx.c src/libsemidx.h $(OUT_SHARED)
 	$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
-		-o "$@" src/semidx.c -L"$(OUT_DIR)" -lsemidx
+		-o "$@" src/semidx.c -L"$(OUT_DIR)" -lsemidx $(DEP_LINKS)
 
 test:
 	@$(MAKE) --no-print-directory $(NATIVE_TARGET)
@@ -156,7 +156,7 @@ test:
 
 $(BIN_DIR)/$(TARGET)/semidx-test: src/test.c src/libsemidx.h $(BIN_DIR)/$(TARGET)/libsemidx.$(TARGET_EXT)
 	$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
-		-o "$@" src/test.c -L"$(BIN_DIR)/$(TARGET)" -lsemidx
+		-o "$@" src/test.c -L"$(BIN_DIR)/$(TARGET)" -lsemidx $(DEP_LINKS)
 
 clean:
 	rm -rf "$(BIN_DIR)"
