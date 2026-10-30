@@ -57,7 +57,7 @@ all: $(SUPPORTED_TARGETS)
 
 define linux_target
 linux/$(1):
-	@$(MAKE) --no-print-directory build-target TARGET=linux/$(1) \
+	@$(MAKE) -s --no-print-directory build-target TARGET=linux/$(1) \
 		TARGET_CC="$(2)" TARGET_EXT=so TARGET_CFLAGS="-fPIC" \
 		TARGET_SHARED="-shared"
 endef
@@ -77,7 +77,7 @@ $(eval $(call linux_target,loongarch64,loongarch64-linux-gnu-gcc))
 
 define windows_target
 windows/$(1):
-	@$(MAKE) --no-print-directory build-target TARGET=windows/$(1) \
+	@$(MAKE) -s --no-print-directory build-target TARGET=windows/$(1) \
 		TARGET_CC="$(2)" TARGET_EXT=dll TARGET_CFLAGS="" \
 		TARGET_SHARED="-shared -Wl,--out-implib,$(BIN_DIR)/windows/$(1)/libsemidx.dll.a" \
 		TARGET_CLI_EXT=.exe
@@ -88,7 +88,7 @@ $(eval $(call windows_target,i686,i686-w64-mingw32-gcc))
 
 define macos_target
 macos/$(1):
-	@$(MAKE) --no-print-directory build-target TARGET=macos/$(1) \
+	@$(MAKE) -s --no-print-directory build-target TARGET=macos/$(1) \
 		TARGET_CC="$(OSXCROSS_ROOT)/bin/$(2)" TARGET_EXT=dylib \
 		TARGET_CFLAGS="-fPIC" \
 		TARGET_SHARED="-dynamiclib -Wl,-install_name,@rpath/libsemidx.dylib"
@@ -99,7 +99,7 @@ $(eval $(call macos_target,aarch64,oa64-clang))
 
 define android_target
 android/$(1):
-	@$(MAKE) --no-print-directory build-target TARGET=android/$(1) \
+	@$(MAKE) -s --no-print-directory build-target TARGET=android/$(1) \
 		TARGET_CC="$(NDK_BIN)/$(2)$(ANDROID_API)-clang" \
 		TARGET_EXT=so TARGET_CFLAGS="-fPIC" TARGET_SHARED="-shared"
 endef
@@ -133,7 +133,7 @@ check-deps:
 
 build-target: check-deps
 	@mkdir -p "$(OUT_DIR)"
-	@$(MAKE) --no-print-directory "$(OUT_CLI)" TARGET="$(TARGET)" \
+	@$(MAKE) -s --no-print-directory "$(OUT_CLI)" TARGET="$(TARGET)" \
 		TARGET_CC="$(TARGET_CC)" TARGET_EXT="$(TARGET_EXT)" \
 		TARGET_CLI_EXT="$(TARGET_CLI_EXT)" TARGET_CFLAGS="$(TARGET_CFLAGS)" \
 		TARGET_SHARED="$(TARGET_SHARED)" \
@@ -205,8 +205,8 @@ test:
 		(cd "$(BUILD_DIR)/test-wine" && \
 			EGL_LOG_LEVEL=fatal WINEDEBUG=-all "$(WINE)" semidx-test.exe all); \
 	else \
-		$(MAKE) --no-print-directory $(NATIVE_TARGET) || exit 1; \
-		$(MAKE) --no-print-directory "$(BUILD_DIR)/test/semidx-test" || exit 1; \
+		$(MAKE) -s --no-print-directory $(NATIVE_TARGET) || exit 1; \
+		$(MAKE) -s --no-print-directory "$(BUILD_DIR)/test/semidx-test" || exit 1; \
 		cp "$(BIN_DIR)/$(NATIVE_TARGET)/semidx$(TARGET_CLI_EXT)" \
 			"$(BUILD_DIR)/test/" || exit 1; \
 		(cd "$(BUILD_DIR)/test" && \
