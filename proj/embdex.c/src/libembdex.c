@@ -685,6 +685,7 @@ typedef struct {
     double semantic;
     int semantic_found;
     int semantic_measured;
+    size_t semantic_rank;
     int full_phrase;
     int accepted;
     size_t final_rank;
@@ -1155,8 +1156,8 @@ static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
             item->accepted ? "true" : "false");
         if (item->accepted) fprintf(file, "%.9g", item->score);
         else fputs("null", file);
-        fprintf(file, ",\"final_rank\":%zu,\"reason\":",
-            item->final_rank);
+        fprintf(file, ",\"semantic_rank\":%zu,\"final_rank\":%zu,\"reason\":",
+            item->semantic_rank, item->final_rank);
         kc_embdex_json_string(file,
             item->reason == NULL ? "not_discovered" : item->reason);
         fputs("}\n", file);
@@ -1190,12 +1191,23 @@ static const char *kc_embdex_accept(const kc_embdex_evidence_t *item,
             (total_query_tokens == 1 &&
                 exact_count + corrected_count == 1)))
         return "strong_lexical_coverage";
+    if (!truncated && exact_count > 0 && corrected_count > 0 &&
+        corrected_count <= exact_count + 1 && coverage >= 0.18)
+        return "corroborated_spelling";
+    if (!truncated && exact_count >= 2 && coverage >= 0.30 &&
+        item->semantic_found && similarity + 0.03 >= semantic_floor)
+        return "corroborated_lexical_evidence";
     if (item->semantic_found && similarity >= semantic_floor + 0.04)
         return "strong_semantic_evidence";
     if (!truncated && item->semantic_found &&
         similarity >= 0.62 && similarity + 0.02 >= semantic_floor &&
         coverage >= 0.10 && (exact_count > 0 || corrected_count > 0))
         return "corroborated_semantic_evidence";
+    if (!truncated && item->semantic_found &&
+        item->semantic_rank > 0 && item->semantic_rank <= 3 &&
+        similarity + 0.04 >= semantic_floor &&
+        coverage >= 0.05)
+        return "ranked_semantic_evidence";
     return NULL;
 }
 
@@ -1445,6 +1457,14 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                     if (cosine >= semantic_floor)
                         evidence[i].semantic_found = 1;
                 }
+                for (size_t i = 0; i < index->count; i++) {
+                    ranks[i].ordinal = i;
+                    ranks[i].score = evidence[i].semantic;
+                }
+                qsort(ranks, index->count, sizeof(*ranks),
+                    kc_embdex_rank_compare);
+                for (size_t i = 0; i < index->count; i++)
+                    evidence[ranks[i].ordinal].semantic_rank = i + 1;
             } else {
                 int result = kc_hnsw_search(index->graph,
                     embedding, window, semantic_floor,
@@ -1467,6 +1487,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                     evidence[(size_t)ordinal].semantic = semantic[i].score;
                     evidence[(size_t)ordinal].semantic_measured = 1;
                     evidence[(size_t)ordinal].semantic_found = 1;
+                    evidence[(size_t)ordinal].semantic_rank = i + 1;
                 }
             }
         }
