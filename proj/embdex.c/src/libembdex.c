@@ -648,6 +648,9 @@ static int kc_embdex_create(
     if (index == NULL) {
         return KC_EMBDEX_ENOMEM;
     }
+    status = kc_embdex_model_identity(index->model_tag);
+    if (status != KC_EMBDEX_OK) goto failure;
+    status = KC_EMBDEX_EEMBED;
     index->dimension = kc_emb_dimension();
     if (index->dimension == 0 ||
         index->dimension > SIZE_MAX / sizeof(float)) {
@@ -655,8 +658,6 @@ static int kc_embdex_create(
     }
 
     for (size_t i = 0; i < count; i++) {
-        size_t length = 0;
-
         index->records[i].id = kc_embdex_copy_string(documents[i].id);
         index->records[i].content = kc_embdex_copy_string(
             documents[i].content
@@ -667,17 +668,21 @@ static int kc_embdex_create(
             status = KC_EMBDEX_ENOMEM;
             goto failure;
         }
-        if (kc_emb_embed(
-            documents[i].content,
-            &index->records[i].owned_vector,
-            &length
-        ) != KC_EMB_OK || length != index->dimension) {
-            goto failure;
-        }
     }
     status = kc_embdex_prepare_lexical(index);
-    if (status != KC_EMBDEX_OK) {
-        goto failure;
+    if (status != KC_EMBDEX_OK) goto failure;
+    status = kc_embdex_wordmap_load(index);
+    if (status != KC_EMBDEX_OK) goto failure;
+    for (size_t i = 0; i < count; i++) {
+        size_t length = 0;
+
+        status = kc_embdex_embed_text(index, documents[i].content,
+            &index->records[i].owned_vector, &length);
+        if (status != KC_EMBDEX_OK) goto failure;
+        if (length != index->dimension) {
+            status = KC_EMBDEX_EEMBED;
+            goto failure;
+        }
     }
     *out = index;
     return KC_EMBDEX_OK;
@@ -798,6 +803,11 @@ int kc_embdex_open(kc_embdex_t **out, const char *path)
     if (index == NULL) {
         return KC_EMBDEX_ENOMEM;
     }
+    status = kc_embdex_model_identity(index->model_tag);
+    if (status != KC_EMBDEX_OK) {
+        kc_embdex_close(index);
+        return status;
+    }
     if (kc_mmap_open(&index->mapping, path) != KC_MMAP_OK) {
         kc_embdex_close(index);
         return KC_EMBDEX_EIO;
@@ -822,6 +832,8 @@ int kc_embdex_open(kc_embdex_t **out, const char *path)
         else if (kc_bm25_count(index->lexical) != index->count)
             status = KC_EMBDEX_EFORMAT;
     }
+    if (status == KC_EMBDEX_OK)
+        status = kc_embdex_wordmap_load(index);
     if (status == KC_EMBDEX_OK && index->count > KC_EMBDEX_EXACT_LIMIT)
         status = kc_embdex_prepare_graph(index);
     if (status != KC_EMBDEX_OK) {
@@ -1762,9 +1774,9 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         for (size_t i = 0; i < index->count; i++)
             exact_full |= evidence[i].full_phrase;
         if (tokens.truncated || !exact_full || limit != 1) {
-            if (kc_emb_embed(query, &embedding, &dimension) != KC_EMB_OK ||
-                dimension != index->dimension)
-            {
+            status = kc_embdex_embed_text(index, query, &embedding, &dimension);
+            if (status != KC_EMBDEX_OK) goto finished;
+            if (dimension != index->dimension) {
                 status = KC_EMBDEX_EEMBED;
                 goto finished;
             }
