@@ -16,7 +16,6 @@
 #include "libleven.h"
 
 #include <inttypes.h>
-#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -27,15 +26,14 @@
 #define KC_EMBDEX_BUILD_VERSION 0
 #endif
 
-#define KC_EMBDEX_HEADER_SIZE 72U
-#define KC_EMBDEX_MAPPED_HEADER_SIZE 104U
-#define KC_EMBDEX_FORMAT_VERSION 1U
-#define KC_EMBDEX_MAPPED_FORMAT_VERSION 2U
+#define KC_EMBDEX_HEADER_SIZE 104U
+#define KC_EMBDEX_FORMAT_VERSION 3U
 #define KC_EMBDEX_MODEL_SIZE 32U
 #define KC_EMBDEX_EXACT_LIMIT 256U
 #define KC_EMBDEX_QUERY_TOKENS 64U
 #define KC_EMBDEX_FUZZY_CHOICES 8U
 #define KC_EMBDEX_COVER_PATHS 2U
+#define KC_EMBDEX_VARIANTS 8U
 
 static const unsigned char kc_embdex_magic[8] = {
     'K', 'C', 'E', 'M', 'B', 'D', 'X', '\n'
@@ -77,7 +75,6 @@ struct kc_embdex {
     size_t mapped_lexical_size;
     size_t wordmap_offset;
     size_t wordmap_size;
-    uint32_t format_version;
     kc_embdex_word_t *wordmap;
     size_t word_count;
     char model_tag[KC_EMBDEX_MODEL_SIZE];
@@ -204,44 +201,6 @@ static char *kc_embdex_copy_string(const char *input)
     return copy;
 }
 
-/**
- * Identify the optional experimental word map in the existing model tag.
- * The bytewise FNV checksum deliberately rejects reuse after map changes.
- * @param tag Receives the complete 32-byte index model identity.
- * @return KC_EMBDEX_OK or a file error.
- */
-static int kc_embdex_model_identity(char tag[KC_EMBDEX_MODEL_SIZE])
-{
-    const char *path = getenv("KC_EMBDEX_WORDMAP");
-    FILE *file;
-    uint32_t digest = UINT32_C(2166136261);
-    int ch;
-
-    memset(tag, 0, KC_EMBDEX_MODEL_SIZE);
-    memcpy(tag, kc_embdex_model, sizeof(kc_embdex_model));
-    if (path == NULL || path[0] == '\0') return KC_EMBDEX_OK;
-    file = fopen(path, "rb");
-    if (file == NULL) return KC_EMBDEX_EIO;
-    while ((ch = fgetc(file)) != EOF) {
-        digest ^= (unsigned char)ch;
-        digest *= UINT32_C(16777619);
-    }
-    {
-        int failed = ferror(file);
-
-        if (fclose(file) != 0 || failed) return KC_EMBDEX_EIO;
-    }
-    memset(tag, 0, KC_EMBDEX_MODEL_SIZE);
-    {
-        int written = snprintf(tag, KC_EMBDEX_MODEL_SIZE,
-            "%s+%08" PRIx32, kc_embdex_model, digest);
-
-        if (written < 0 || (size_t)written >= KC_EMBDEX_MODEL_SIZE)
-            return KC_EMBDEX_EFORMAT;
-    }
-    return KC_EMBDEX_OK;
-}
-
 typedef struct {
     char *value;
     size_t count;
@@ -329,7 +288,7 @@ static int kc_embdex_word_compare(const void *a, const void *b)
 /**
  * Find the first candidate translation by source word.
  * Multiple dictionary lines may share a source term, in file order.
- * @param index Loaded experimental word map.
+ * @param index Index with its loaded dictionary.
  * @param word BM25-normalized source term.
  * @param count Receives number of translations available.
  * @return Start position, or zero with count zero when absent.
@@ -483,16 +442,9 @@ static int kc_embdex_wordmap_load(kc_embdex_t *index,
     const char *const *paths, size_t count)
 {
     size_t capacity = 0;
-    const char *legacy = getenv("KC_EMBDEX_WORDMAP");
     int status;
 
-    if (count == 0) {
-        if (legacy == NULL || legacy[0] == '\0') return KC_EMBDEX_OK;
-        paths = &legacy;
-        count = 1;
-    } else if (paths == NULL) {
-        return KC_EMBDEX_EINVAL;
-    }
+    if (count > 0 && paths == NULL) return KC_EMBDEX_EINVAL;
     for (size_t i = 0; i < count; i++) {
         if (paths[i] == NULL || paths[i][0] == '\0')
             return KC_EMBDEX_EINVAL;
@@ -635,13 +587,13 @@ static int kc_embdex_word_append(char **buffer, size_t *used,
 }
 
 /**
- * Embed with word-for-word substitution when an experimental map is enabled.
- * Unmatched words and all punctuation are preserved byte-for-byte.
- * @param index Index with a loaded wordmap and lexical normalizer.
- * @param text Borrowed original input.
- * @param vector Receives the embedding allocated by libemb.
- * @param dimension Receives the vector length.
- * @return KC_EMBDEX_OK or an embedding, normalization or memory error.
+ * Substitute dictionary words while preserving unmatched text and punctuation.
+ * @param index Index with a dictionary and lexical normalizer.
+ * @param text Borrowed input text.
+ * @param variant Selected dictionary variant.
+ * @param plan Optional variant selection policy.
+ * @param output Receives owned, NUL-terminated substituted text.
+ * @return KC_EMBDEX_OK or a negative error status.
  */
 static int kc_embdex_transform_text(const kc_embdex_t *index,
     const char *text, size_t variant,
@@ -689,8 +641,8 @@ static int kc_embdex_transform_text(const kc_embdex_t *index,
                     replacement = index->wordmap[first + choice].replacement;
                     if (alternatives > 1) {
                         ambiguous++;
-                        stride = stride > 16 / alternatives ?
-                            16 : stride * alternatives;
+                        stride = stride > KC_EMBDEX_VARIANTS / alternatives ?
+                            KC_EMBDEX_VARIANTS : stride * alternatives;
                     }
                 }
             }
@@ -718,7 +670,7 @@ static int kc_embdex_transform_text(const kc_embdex_t *index,
 /**
  * Embed original or literally substituted words using the selected variant.
  * The mapped string is temporary and never alters stored document content.
- * @param index Index with an optional experimental dictionary.
+ * @param index Index with an optional dictionary.
  * @param text Original input text.
  * @param variant Bounded word-combination ordinal.
  * @param vector Receives the owned model embedding.
@@ -903,6 +855,8 @@ static int kc_embdex_prepare_mapped_lexical(kc_embdex_t *index)
  * @param out Receives the built index.
  * @param documents Input corpus.
  * @param count Number of entries in the corpus.
+ * @param dictionaries Dictionary paths, or NULL when absent.
+ * @param dictionary_count Number of dictionary paths.
  * @return KC_EMBDEX_OK or a negative status code.
  */
 static int kc_embdex_create(
@@ -933,12 +887,6 @@ static int kc_embdex_create(
     if (index == NULL) {
         return KC_EMBDEX_ENOMEM;
     }
-    if (dictionary_count == 0) {
-        status = kc_embdex_model_identity(index->model_tag);
-        if (status != KC_EMBDEX_OK) goto failure;
-    } else {
-        memcpy(index->model_tag, kc_embdex_model, sizeof(kc_embdex_model));
-    }
     status = KC_EMBDEX_EEMBED;
     index->dimension = kc_emb_dimension();
     if (index->dimension == 0 ||
@@ -963,10 +911,8 @@ static int kc_embdex_create(
     status = kc_embdex_wordmap_load(index,
         dictionaries, dictionary_count);
     if (status != KC_EMBDEX_OK) goto failure;
-    if (dictionary_count > 0 && index->word_count > 0) {
-        status = kc_embdex_wordmap_identity(index);
-        if (status != KC_EMBDEX_OK) goto failure;
-    }
+    status = kc_embdex_wordmap_identity(index);
+    if (status != KC_EMBDEX_OK) goto failure;
     status = kc_embdex_prepare_mapped_lexical(index);
     if (status != KC_EMBDEX_OK) goto failure;
     for (size_t i = 0; i < count; i++) {
@@ -1001,7 +947,6 @@ static int kc_embdex_load_records(kc_embdex_t *index)
     const unsigned char *data;
     uint64_t count;
     uint32_t version;
-    size_t header_size;
 
     if (kc_mmap_get(index->mapping, &bytes, &size) != KC_MMAP_OK ||
         size < KC_EMBDEX_HEADER_SIZE) {
@@ -1009,56 +954,41 @@ static int kc_embdex_load_records(kc_embdex_t *index)
     }
     data = (const unsigned char *)bytes;
     version = kc_embdex_read_u32(data + 8);
-    header_size = version == KC_EMBDEX_MAPPED_FORMAT_VERSION ?
-        KC_EMBDEX_MAPPED_HEADER_SIZE : KC_EMBDEX_HEADER_SIZE;
     if (memcmp(data, kc_embdex_magic, 8) != 0 ||
-        (version != KC_EMBDEX_FORMAT_VERSION &&
-        version != KC_EMBDEX_MAPPED_FORMAT_VERSION) ||
-        size < header_size)
+        version != KC_EMBDEX_FORMAT_VERSION ||
+        size < KC_EMBDEX_HEADER_SIZE)
         return KC_EMBDEX_EFORMAT;
-    if (version == KC_EMBDEX_FORMAT_VERSION) {
-        if (memcmp(data + 24, index->model_tag,
-            KC_EMBDEX_MODEL_SIZE) != 0)
-            return KC_EMBDEX_EFORMAT;
-    } else {
+    {
         size_t model_length = strlen(kc_embdex_model);
 
         if (memcmp(data + 24, kc_embdex_model, model_length) != 0 ||
             data[24 + model_length] != '+')
             return KC_EMBDEX_EFORMAT;
     }
-    index->format_version = version;
     {
         uint64_t lexical_offset = kc_embdex_read_u64(data + 56);
         uint64_t lexical_size = kc_embdex_read_u64(data + 64);
+        uint64_t mapped_offset = kc_embdex_read_u64(data + 72);
+        uint64_t mapped_size = kc_embdex_read_u64(data + 80);
+        uint64_t words_offset = kc_embdex_read_u64(data + 88);
+        uint64_t words_size = kc_embdex_read_u64(data + 96);
 
-        if (lexical_offset < header_size ||
+        if (lexical_offset < KC_EMBDEX_HEADER_SIZE ||
             lexical_offset > size || lexical_size == 0 ||
-            lexical_size > size - lexical_offset)
+            lexical_size > size - lexical_offset ||
+            mapped_offset != lexical_offset + lexical_size ||
+            mapped_offset > size || mapped_size > size - mapped_offset ||
+            words_offset != mapped_offset + mapped_size ||
+            words_offset > size || words_size < 4 ||
+            words_size > size - words_offset ||
+            words_offset + words_size != size)
             return KC_EMBDEX_EFORMAT;
         index->lexical_offset = (size_t)lexical_offset;
         index->lexical_size = (size_t)lexical_size;
-        if (version == KC_EMBDEX_MAPPED_FORMAT_VERSION) {
-            uint64_t mapped_offset = kc_embdex_read_u64(data + 72);
-            uint64_t mapped_size = kc_embdex_read_u64(data + 80);
-            uint64_t words_offset = kc_embdex_read_u64(data + 88);
-            uint64_t words_size = kc_embdex_read_u64(data + 96);
-
-            if (mapped_offset != lexical_offset + lexical_size ||
-                mapped_offset > size || mapped_size == 0 ||
-                mapped_size > size - mapped_offset ||
-                words_offset != mapped_offset + mapped_size ||
-                words_offset > size || words_size < 4 ||
-                words_size > size - words_offset ||
-                words_offset + words_size != size)
-                return KC_EMBDEX_EFORMAT;
-            index->mapped_lexical_offset = (size_t)mapped_offset;
-            index->mapped_lexical_size = (size_t)mapped_size;
-            index->wordmap_offset = (size_t)words_offset;
-            index->wordmap_size = (size_t)words_size;
-        } else if (lexical_offset + lexical_size != size) {
-            return KC_EMBDEX_EFORMAT;
-        }
+        index->mapped_lexical_offset = (size_t)mapped_offset;
+        index->mapped_lexical_size = (size_t)mapped_size;
+        index->wordmap_offset = (size_t)words_offset;
+        index->wordmap_size = (size_t)words_size;
     }
     index->dimension = kc_embdex_read_u32(data + 12);
     count = kc_embdex_read_u64(data + 16);
@@ -1076,7 +1006,7 @@ static int kc_embdex_load_records(kc_embdex_t *index)
             return KC_EMBDEX_ENOMEM;
         }
     }
-    offset = header_size;
+    offset = KC_EMBDEX_HEADER_SIZE;
     for (size_t i = 0; i < index->count; i++) {
         size_t id_length;
         size_t content_length;
@@ -1141,8 +1071,9 @@ static int kc_embdex_load_wordmap(kc_embdex_t *index)
         return KC_EMBDEX_EFORMAT;
     count = kc_embdex_read_u32(data + offset);
     offset += 4;
-    if (count == 0 || count > 4096)
-        return KC_EMBDEX_EFORMAT;
+    if (count > 4096) return KC_EMBDEX_EFORMAT;
+    if (count == 0) return offset == end ? KC_EMBDEX_OK :
+        KC_EMBDEX_EFORMAT;
     index->wordmap = (kc_embdex_word_t *)calloc(count,
         sizeof(*index->wordmap));
     if (index->wordmap == NULL) return KC_EMBDEX_ENOMEM;
@@ -1214,25 +1145,6 @@ int kc_embdex_open(kc_embdex_t **out, const char *path)
         kc_embdex_close(index);
         return KC_EMBDEX_EIO;
     }
-    {
-        const void *header = NULL;
-        size_t size = 0;
-        uint32_t version;
-
-        if (kc_mmap_get(index->mapping, &header, &size) != KC_MMAP_OK ||
-            size < KC_EMBDEX_HEADER_SIZE) {
-            kc_embdex_close(index);
-            return KC_EMBDEX_EFORMAT;
-        }
-        version = kc_embdex_read_u32((const unsigned char *)header + 8);
-        if (version == KC_EMBDEX_FORMAT_VERSION) {
-            status = kc_embdex_model_identity(index->model_tag);
-            if (status != KC_EMBDEX_OK) {
-                kc_embdex_close(index);
-                return status;
-            }
-        }
-    }
     status = kc_embdex_load_records(index);
     if (status == KC_EMBDEX_OK) {
         const void *mapped = NULL;
@@ -1253,26 +1165,36 @@ int kc_embdex_open(kc_embdex_t **out, const char *path)
         else if (kc_bm25_count(index->lexical) != index->count)
             status = KC_EMBDEX_EFORMAT;
     }
-    if (status == KC_EMBDEX_OK &&
-        index->format_version == KC_EMBDEX_MAPPED_FORMAT_VERSION)
-    {
+    if (status == KC_EMBDEX_OK) {
         const void *bytes = NULL;
         size_t size = 0;
-        int result = KC_BM25_EFORMAT;
 
-        if (kc_mmap_get(index->mapping, &bytes, &size) == KC_MMAP_OK)
-            result = kc_bm25_import(&index->mapped_lexical,
-                (const unsigned char *)bytes + index->mapped_lexical_offset,
-                index->mapped_lexical_size);
-        if (result != KC_BM25_OK)
-            status = result == KC_BM25_ENOMEM ?
-                KC_EMBDEX_ENOMEM : KC_EMBDEX_EFORMAT;
-        else if (kc_bm25_count(index->mapped_lexical) != index->count)
-            status = KC_EMBDEX_EFORMAT;
+        if (index->mapped_lexical_size > 0) {
+            int result = KC_BM25_EFORMAT;
+
+            if (kc_mmap_get(index->mapping, &bytes, &size) == KC_MMAP_OK)
+                result = kc_bm25_import(&index->mapped_lexical,
+                    (const unsigned char *)bytes +
+                    index->mapped_lexical_offset,
+                    index->mapped_lexical_size);
+            if (result != KC_BM25_OK)
+                status = result == KC_BM25_ENOMEM ?
+                    KC_EMBDEX_ENOMEM : KC_EMBDEX_EFORMAT;
+            else if (kc_bm25_count(index->mapped_lexical) != index->count)
+                status = KC_EMBDEX_EFORMAT;
+        }
         if (status == KC_EMBDEX_OK)
             status = kc_embdex_load_wordmap(index);
-    } else if (status == KC_EMBDEX_OK) {
-        status = kc_embdex_wordmap_load(index, NULL, 0);
+        if (status == KC_EMBDEX_OK &&
+            (index->word_count > 0) != (index->mapped_lexical != NULL))
+            status = KC_EMBDEX_EFORMAT;
+        if (status == KC_EMBDEX_OK)
+            status = kc_embdex_wordmap_identity(index);
+        if (status == KC_EMBDEX_OK &&
+            (kc_mmap_get(index->mapping, &bytes, &size) != KC_MMAP_OK ||
+            memcmp((const unsigned char *)bytes + 24, index->model_tag,
+                KC_EMBDEX_MODEL_SIZE) != 0))
+            status = KC_EMBDEX_EFORMAT;
     }
     if (status == KC_EMBDEX_OK && index->count > KC_EMBDEX_EXACT_LIMIT)
         status = kc_embdex_prepare_graph(index);
@@ -1295,8 +1217,7 @@ static int kc_embdex_serialized_size(
     size_t *out_size
 )
 {
-    size_t total = index->word_count == 0 ?
-        KC_EMBDEX_HEADER_SIZE : KC_EMBDEX_MAPPED_HEADER_SIZE;
+    size_t total = KC_EMBDEX_HEADER_SIZE;
 
     if (index->dimension > SIZE_MAX / sizeof(float)) {
         return KC_EMBDEX_EFORMAT;
@@ -1361,6 +1282,7 @@ static int kc_embdex_save(const kc_embdex_t *index, const char *path)
             goto finished;
         }
     }
+    words_size = 4;
     if (index->word_count > 0) {
         int result = kc_bm25_export(index->mapped_lexical,
             &mapped_bytes, &mapped_size);
@@ -1370,7 +1292,6 @@ static int kc_embdex_save(const kc_embdex_t *index, const char *path)
                 KC_EMBDEX_ENOMEM : KC_EMBDEX_ELEXICAL;
             goto finished;
         }
-        words_size = 4;
         for (size_t i = 0; i < index->word_count; i++) {
             size_t source_length = strlen(index->wordmap[i].source);
             size_t replacement_length =
@@ -1407,27 +1328,22 @@ static int kc_embdex_save(const kc_embdex_t *index, const char *path)
         status = KC_EMBDEX_ENOMEM;
         goto finished;
     }
-    memset(data, 0, index->word_count > 0 ?
-        KC_EMBDEX_MAPPED_HEADER_SIZE : KC_EMBDEX_HEADER_SIZE);
+    memset(data, 0, KC_EMBDEX_HEADER_SIZE);
     memcpy(data, kc_embdex_magic, 8);
-    kc_embdex_write_u32(data + 8, index->word_count > 0 ?
-        KC_EMBDEX_MAPPED_FORMAT_VERSION : KC_EMBDEX_FORMAT_VERSION);
+    kc_embdex_write_u32(data + 8, KC_EMBDEX_FORMAT_VERSION);
     kc_embdex_write_u32(data + 12, (uint32_t)index->dimension);
     kc_embdex_write_u64(data + 16, (uint64_t)index->count);
     memcpy(data + 24, index->model_tag, KC_EMBDEX_MODEL_SIZE);
     kc_embdex_write_u64(data + 56, (uint64_t)record_size);
     kc_embdex_write_u64(data + 64, (uint64_t)lexical_size);
-    if (index->word_count > 0) {
-        kc_embdex_write_u64(data + 72,
-            (uint64_t)(record_size + lexical_size));
-        kc_embdex_write_u64(data + 80, (uint64_t)mapped_size);
-        kc_embdex_write_u64(data + 88,
-            (uint64_t)(record_size + lexical_size + mapped_size));
-        kc_embdex_write_u64(data + 96, (uint64_t)words_size);
-    }
+    kc_embdex_write_u64(data + 72,
+        (uint64_t)(record_size + lexical_size));
+    kc_embdex_write_u64(data + 80, (uint64_t)mapped_size);
+    kc_embdex_write_u64(data + 88,
+        (uint64_t)(record_size + lexical_size + mapped_size));
+    kc_embdex_write_u64(data + 96, (uint64_t)words_size);
 
-    offset = index->word_count > 0 ?
-        KC_EMBDEX_MAPPED_HEADER_SIZE : KC_EMBDEX_HEADER_SIZE;
+    offset = KC_EMBDEX_HEADER_SIZE;
     for (size_t i = 0; i < index->count; i++) {
         size_t id_length = strlen(index->records[i].id);
         size_t content_length = strlen(index->records[i].content);
@@ -1453,12 +1369,13 @@ static int kc_embdex_save(const kc_embdex_t *index, const char *path)
     }
     memcpy(data + offset, lexical_bytes, lexical_size);
     offset += lexical_size;
-    if (index->word_count > 0) {
+    if (mapped_size > 0) {
         memcpy(data + offset, mapped_bytes, mapped_size);
         offset += mapped_size;
-        kc_embdex_write_u32(data + offset, (uint32_t)index->word_count);
-        offset += 4;
-        for (size_t i = 0; i < index->word_count; i++) {
+    }
+    kc_embdex_write_u32(data + offset, (uint32_t)index->word_count);
+    offset += 4;
+    for (size_t i = 0; i < index->word_count; i++) {
             size_t a = strlen(index->wordmap[i].source);
             size_t b = strlen(index->wordmap[i].replacement);
 
@@ -1469,7 +1386,6 @@ static int kc_embdex_save(const kc_embdex_t *index, const char *path)
             offset += a + 1;
             memcpy(data + offset, index->wordmap[i].replacement, b + 1);
             offset += b + 1;
-        }
     }
     if (offset != size) {
         status = KC_EMBDEX_EFORMAT;
@@ -2227,31 +2143,22 @@ static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
 /**
  * Bound the number of heuristic word-substitution variants per query.
  * The baseline experiment compares one translation; ambiguous queries
- * can be tested with up to sixteen deterministic word combinations.
- * @param index Index with a previously loaded word map.
- * @param tokens Already-normalized query words.
- * @param count Receives the number of model calls.
- * @return KC_EMBDEX_OK or EINVAL for an invalid budget.
+ * can be tested with up to eight deterministic word combinations.
+ * @param index Index with its loaded dictionary.
+ * @param tokens Normalized query words.
+ * @param plan Receives the bounded variant plan.
+ * @return void
  */
-static int kc_embdex_variant_count(const kc_embdex_t *index,
+static void kc_embdex_variant_count(const kc_embdex_t *index,
     const kc_embdex_tokens_t *tokens, kc_embdex_variant_plan_t *plan)
 {
-    const char *configured = getenv("KC_EMBDEX_WORDMAP_VARIANTS");
     size_t combinations = 1;
-    size_t budget = 8;
+    const size_t budget = KC_EMBDEX_VARIANTS;
 
     plan->count = 1;
     plan->ambiguous = 0;
     plan->exhaustive = 1;
-    if (index->word_count == 0) return KC_EMBDEX_OK;
-    if (configured != NULL && configured[0] != '\0') {
-        char *end = NULL;
-        unsigned long value = strtoul(configured, &end, 10);
-
-        if (end == configured || *end != '\0' || value < 1 ||
-            value > 16) return KC_EMBDEX_EINVAL;
-        budget = (size_t)value;
-    }
+    if (index->word_count == 0) return;
     for (size_t i = 0; i < tokens->count; i++) {
         size_t alternatives = 0;
 
@@ -2264,7 +2171,6 @@ static int kc_embdex_variant_count(const kc_embdex_t *index,
     }
     plan->count = combinations > budget ? budget : combinations;
     plan->exhaustive = combinations <= budget;
-    return KC_EMBDEX_OK;
 }
 
 /**
@@ -2374,7 +2280,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     size_t semantic_count = 0, rank_count = 0, variants = 1;
     kc_embdex_variant_plan_t variant_plan = {0};
     size_t unique_variants = 0;
-    char *variant_text[16] = {0};
+    char *variant_text[KC_EMBDEX_VARIANTS] = {0};
     double *variant_scores = NULL;
     double weights[KC_EMBDEX_QUERY_TOKENS] = {0};
     double total_weight = 0;
@@ -2634,8 +2540,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         literal_sufficient = kc_embdex_cover_rank(
             evidence, index->count, tokens.count);
 
-    status = kc_embdex_variant_count(index, &tokens, &variant_plan);
-    if (status != KC_EMBDEX_OK) goto finished;
+    kc_embdex_variant_count(index, &tokens, &variant_plan);
     variants = variant_plan.count;
     if (getenv("KC_EMBDEX_TRACE") != NULL &&
         getenv("KC_EMBDEX_TRACE")[0] != '\0')
@@ -2885,7 +2790,7 @@ finished:
     kc_embdex_tokens_close(&mapped_tokens);
     free(joined);
     free(mapped_query);
-    for (size_t i = 0; i < 16; i++)
+    for (size_t i = 0; i < KC_EMBDEX_VARIANTS; i++)
         free(variant_text[i]);
     free(variant_scores);
     free(evidence);
