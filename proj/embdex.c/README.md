@@ -30,7 +30,7 @@ A map can be compiled from a dataset and multiple independent dictionaries:
 
 ```sh
 embdex build mapa.bin -i asociaciones.tsv \
-    -d spanish.tsv -d rioplatense.tsv
+    -d spanish.tsv -d rioplatense.tsv --progress
 embdex search mapa.bin "guardar mis claves"
 ```
 
@@ -39,7 +39,8 @@ replacements for the same word. The binary embeds their merged contents,
 the original associations, and the precomputed retrieval structures.
 Search only needs the map; it does not load the input TSV files or
 interpret language or regional metadata. All builds produce the same binary
-format, with or without dictionaries.
+format, with or without dictionaries. The optional `--progress` flag
+prints build stages and embedding completion every 10% to standard error.
 
 ## Native library
 
