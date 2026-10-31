@@ -147,6 +147,46 @@ checked for valid UTF-8 before lexical retrieval.
 Indexes up to 256 associations use exact cosine and skip a resident
 HNSW graph; larger indexes construct HNSW at open time.
 
+## Experimental literal word substitutions
+
+To measure whether the existing English embedding model can retrieve
+Spanish queries more reliably, `KC_EMBDEX_WORDMAP` optionally specifies a
+tab-separated UTF-8 file of one **Spanish word** and one **English word**
+per line. Repeating a source word declares alternative translations in
+file order. The source text is not translated grammatically: individual
+words are replaced in place; unknown words and punctuation are retained.
+This transformation only changes the text passed to `libemb`.
+Original strings and all lexical retrieval stay unchanged.
+
+```sh
+KC_EMBDEX_WORDMAP=wordmap-es-en.tsv embdex build corpus.bin -i corpus.tsv
+KC_EMBDEX_WORDMAP=wordmap-es-en.tsv \
+    KC_EMBDEX_WORDMAP_VARIANTS=8 \
+    embdex search corpus.bin "qué bondi va al centro" --limit 5
+```
+
+The corpus embeddings use the **first** English translation for each word.
+Queries can test up to 16 deterministic alternative word combinations;
+each resulting embedding is evaluated against the corpus, and the best
+cosine for each association enters normal acceptance and ranking.
+This does not claim that selecting the largest cosine is always a better
+match: more comparisons may also increase false positives.
+
+The `KC_EMBDEX_WORDMAP_VARIANTS` budget defaults to 8 when ambiguous words
+are present (1 disables alternative combinations). Indexes with no
+wordmap continue to use the original embedding path. The full wordmap
+bytes are included in the index model identity, so a mapped index must be
+opened with the same file and rebuilt when the map changes.
+
+`KC_EMBDEX_WORDMAP_TRACE` can write optional JSONL records containing
+the original text, substituted text and combination number.
+Like `KC_EMBDEX_TRACE`, it is diagnostic and includes user content.
+
+These environment variables are isolated experimental controls rather
+than new public search modes or a standardized dictionary interface.
+They are intended to be removed or redesigned after the bilingual
+benchmark establishes whether literal substitutions actually help.
+
 ## CLI
 
 Build reads tab-separated ID/content associations from standard input
