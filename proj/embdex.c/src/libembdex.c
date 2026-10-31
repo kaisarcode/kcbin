@@ -28,7 +28,9 @@
 #endif
 
 #define KC_EMBDEX_HEADER_SIZE 72U
+#define KC_EMBDEX_MAPPED_HEADER_SIZE 88U
 #define KC_EMBDEX_FORMAT_VERSION 1U
+#define KC_EMBDEX_MAPPED_FORMAT_VERSION 2U
 #define KC_EMBDEX_MODEL_SIZE 32U
 #define KC_EMBDEX_EXACT_LIMIT 256U
 #define KC_EMBDEX_QUERY_TOKENS 64U
@@ -66,9 +68,12 @@ struct kc_embdex {
     size_t dimension;
     kc_hnsw_t *graph;
     kc_bm25_t *lexical;
+    kc_bm25_t *mapped_lexical;
     kc_mmap_t *mapping;
     size_t lexical_offset;
     size_t lexical_size;
+    size_t mapped_lexical_offset;
+    size_t mapped_lexical_size;
     kc_embdex_word_t *wordmap;
     size_t word_count;
     char model_tag[KC_EMBDEX_MODEL_SIZE];
@@ -769,6 +774,43 @@ static int kc_embdex_prepare_lexical(kc_embdex_t *index)
 }
 
 /**
+ * Construct a separate BM25 section for literal dictionary substitutions.
+ * Original associations retain their own independent lexical index.
+ * @param index Index with normalized wordmap and original analyzer.
+ * @return KC_EMBDEX_OK or a negative status.
+ */
+static int kc_embdex_prepare_mapped_lexical(kc_embdex_t *index)
+{
+    int fold_accents = 1;
+    kc_bm25_options_t options = { .fold_accents = &fold_accents };
+    int status;
+
+    if (index->word_count == 0) return KC_EMBDEX_OK;
+    status = kc_bm25_open(&index->mapped_lexical, &options);
+    if (status != KC_BM25_OK)
+        return status == KC_BM25_ENOMEM ?
+            KC_EMBDEX_ENOMEM : KC_EMBDEX_ELEXICAL;
+    for (size_t i = 0; i < index->count; i++) {
+        char ordinal[32];
+        char *mapped = NULL;
+
+        if (snprintf(ordinal, sizeof(ordinal), "%zu", i) < 0)
+            return KC_EMBDEX_ELEXICAL;
+        status = kc_embdex_transform_text(index,
+            index->records[i].content, 0, NULL, &mapped);
+        if (status != KC_EMBDEX_OK) return status;
+        status = kc_bm25_add(index->mapped_lexical, ordinal, mapped);
+        free(mapped);
+        if (status != KC_BM25_OK)
+            return status == KC_BM25_ENOMEM ?
+                KC_EMBDEX_ENOMEM : KC_EMBDEX_ELEXICAL;
+    }
+    status = kc_bm25_build(index->mapped_lexical);
+    return status == KC_BM25_OK ? KC_EMBDEX_OK :
+        status == KC_BM25_ENOMEM ? KC_EMBDEX_ENOMEM : KC_EMBDEX_ELEXICAL;
+}
+
+/**
  * Build an index of independent text associations.
  * @param out Receives the built index.
  * @param documents Input corpus.
@@ -825,6 +867,8 @@ static int kc_embdex_create(
     status = kc_embdex_prepare_lexical(index);
     if (status != KC_EMBDEX_OK) goto failure;
     status = kc_embdex_wordmap_load(index);
+    if (status != KC_EMBDEX_OK) goto failure;
+    status = kc_embdex_prepare_mapped_lexical(index);
     if (status != KC_EMBDEX_OK) goto failure;
     for (size_t i = 0; i < count; i++) {
         size_t length = 0;
@@ -2273,6 +2317,7 @@ void kc_embdex_close(kc_embdex_t *index)
     }
     kc_hnsw_close(index->graph);
     kc_bm25_close(index->lexical);
+    kc_bm25_close(index->mapped_lexical);
     for (size_t i = 0; i < index->count; i++) {
         if (index->records != NULL) {
             if (index->records[i].owned_strings) {
