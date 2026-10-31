@@ -1140,7 +1140,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         }
     }
 
-    window = index->count;
+    window = limit > 100 ? limit : 100;
+    if (window > index->count) window = index->count;
     lexical_options.limit = &window;
     {
         int result = kc_bm25_search(index->lexical, query,
@@ -1230,7 +1231,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                 }
             } else {
                 int result = kc_hnsw_search(index->graph,
-                    embedding, index->count, semantic_floor,
+                    embedding, window, semantic_floor,
                     &semantic, &semantic_count);
 
                 if (result != KC_HNSW_OK) {
