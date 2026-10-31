@@ -293,7 +293,7 @@ static int kc_embdex_prepare_lexical(kc_embdex_t *index)
  * @param count Number of entries in the corpus.
  * @return KC_EMBDEX_OK or a negative status code.
  */
-int kc_embdex_build(
+static int kc_embdex_create(
     kc_embdex_t **out,
     const kc_embdex_document_t *documents,
     size_t count
@@ -548,11 +548,11 @@ static int kc_embdex_serialized_size(
 
 /**
  * Save a built index with little-endian lengths and vectors.
- * @param index Index created by kc_embdex_build().
+ * @param index Index created by kc_embdex_create().
  * @param path Binary destination file.
  * @return KC_EMBDEX_OK or a negative status code.
  */
-int kc_embdex_save(const kc_embdex_t *index, const char *path)
+static int kc_embdex_save(const kc_embdex_t *index, const char *path)
 {
     kc_mmap_t *mapping = NULL;
     unsigned char *data;
@@ -639,100 +639,23 @@ int kc_embdex_save(const kc_embdex_t *index, const char *path)
 }
 
 /**
- * Search a semantic index and restore its user-supplied associations.
- * @param index Index to query.
- * @param query Search text.
- * @param options Optional search settings.
- * @param out_results Receives the allocated result array.
- * @param out_count Receives the number of results.
- * @return KC_EMBDEX_OK or a negative status code.
+ * Create a persistent index, closing the temporary build resources.
+ * @param path File destination.
+ * @param documents Borrowed associations.
+ * @param count Number of associations.
+ * @return KC_EMBDEX_OK or a negative error code.
  */
-int kc_embdex_search(
-    const kc_embdex_t *index,
-    const char *query,
-    const kc_embdex_search_options_t *options,
-    kc_embdex_result_t **out_results,
-    size_t *out_count
-)
+int kc_embdex_build(const char *path,
+    const kc_embdex_document_t *documents, size_t count)
 {
-    float *embedding = NULL;
-    size_t dimension = 0;
-    size_t limit = 10;
-    double threshold = -1.0;
-    kc_hnsw_result_t *matches = NULL;
-    size_t count = 0;
-    kc_embdex_result_t *results;
-    int status = KC_EMBDEX_EINDEX;
+    kc_embdex_t *index = NULL;
+    int status;
 
-    if (out_results == NULL || out_count == NULL) {
-        return KC_EMBDEX_EINVAL;
-    }
-    *out_results = NULL;
-    *out_count = 0;
-    if (index == NULL || query == NULL || index->graph == NULL) {
-        return KC_EMBDEX_EINVAL;
-    }
-    if (options != NULL) {
-        if (options->limit != NULL) {
-            limit = *options->limit;
-        }
-        if (options->threshold != NULL) {
-            threshold = *options->threshold;
-        }
-    }
-    if (!isfinite(threshold) || threshold < -1.0 || threshold > 1.0) {
-        return KC_EMBDEX_EINVAL;
-    }
-    if (limit > INT_MAX) {
-        return KC_EMBDEX_EINVAL;
-    }
-    if (limit == 0 || index->count == 0) {
-        return KC_EMBDEX_OK;
-    }
-    if (kc_emb_embed(query, &embedding, &dimension) != KC_EMB_OK ||
-        dimension != index->dimension) {
-        kc_emb_free(embedding);
-        return KC_EMBDEX_EEMBED;
-    }
-    if (kc_hnsw_search(
-        index->graph, embedding, limit, threshold, &matches, &count
-    ) != KC_HNSW_OK) {
-        kc_emb_free(embedding);
-        return KC_EMBDEX_EINDEX;
-    }
-    kc_emb_free(embedding);
-    if (count == 0) {
-        return KC_EMBDEX_OK;
-    }
-    if (count > SIZE_MAX / sizeof(*results)) {
-        kc_hnsw_free(matches);
-        return KC_EMBDEX_ENOMEM;
-    }
-    results = (kc_embdex_result_t *)calloc(count, sizeof(*results));
-    if (results == NULL) {
-        kc_hnsw_free(matches);
-        return KC_EMBDEX_ENOMEM;
-    }
-    for (size_t i = 0; i < count; i++) {
-        char *end;
-        uintmax_t ordinal = strtoumax(matches[i].id, &end, 10);
-
-        if (matches[i].id[0] == '\0' || *end != '\0' ||
-            ordinal >= index->count) {
-            goto failure;
-        }
-        results[i].id = index->records[(size_t)ordinal].id;
-        results[i].content = index->records[(size_t)ordinal].content;
-        results[i].score = matches[i].score;
-    }
-    *out_results = results;
-    *out_count = count;
-    kc_hnsw_free(matches);
-    return KC_EMBDEX_OK;
-
-failure:
-    free(results);
-    kc_hnsw_free(matches);
+    if (path == NULL || path[0] == '\0') return KC_EMBDEX_EINVAL;
+    status = kc_embdex_create(&index, documents, count);
+    if (status != KC_EMBDEX_OK) return status;
+    status = kc_embdex_save(index, path);
+    kc_embdex_close(index);
     return status;
 }
 
@@ -742,10 +665,10 @@ typedef struct {
 } kc_embdex_rank_t;
 
 /**
- * Rank higher scores first, breaking exact ties by document ordinal.
+ * Compare candidates by descending score and insertion order.
  * @param left First candidate.
  * @param right Second candidate.
- * @return Negative, zero, or positive sort order.
+ * @return Sort order.
  */
 static int kc_embdex_rank_compare(const void *left, const void *right)
 {
@@ -760,12 +683,12 @@ static int kc_embdex_rank_compare(const void *left, const void *right)
 }
 
 /**
- * Insert or update a candidate by its private ordinal.
+ * Accumulate an independent rank contribution by document ordinal.
  * @param ranks Preallocated candidate array.
- * @param count Current number of distinct candidates.
- * @param capacity Maximum number of candidates.
- * @param ordinal Document ordinal.
- * @param score Score to add to the candidate.
+ * @param count Current candidate count.
+ * @param capacity Maximum candidate count.
+ * @param ordinal Unique association ordinal.
+ * @param score Additional rank evidence.
  * @return KC_EMBDEX_OK or an error status.
  */
 static int kc_embdex_rank_add(kc_embdex_rank_t *ranks,
@@ -777,7 +700,7 @@ static int kc_embdex_rank_add(kc_embdex_rank_t *ranks,
             return KC_EMBDEX_OK;
         }
     }
-    if (*count >= capacity) return KC_EMBDEX_EINDEX;
+    if (*count == capacity) return KC_EMBDEX_EINDEX;
     ranks[*count].ordinal = ordinal;
     ranks[*count].score = score;
     (*count)++;
@@ -785,224 +708,116 @@ static int kc_embdex_rank_add(kc_embdex_rank_t *ranks,
 }
 
 /**
- * Measure cosine similarity against a stored document vector.
- * @param index Index containing built or mapped vectors.
- * @param ordinal Document ordinal.
- * @param query Embedded query vector.
- * @return Cosine similarity, or zero for a zero-length vector.
- */
-static double kc_embdex_cosine(const kc_embdex_t *index,
-    size_t ordinal, const float *query)
-{
-    const kc_embdex_record_t *record = &index->records[ordinal];
-    double dot = 0.0, query_norm = 0.0, record_norm = 0.0;
-
-    for (size_t j = 0; j < index->dimension; j++) {
-        double a = (double)query[j];
-        double b = record->owned_vector != NULL ?
-            (double)record->owned_vector[j] :
-            (double)kc_embdex_read_float(record->encoded + j * sizeof(float));
-
-        dot += a * b;
-        query_norm += a * a;
-        record_norm += b * b;
-    }
-    if (query_norm == 0.0 || record_norm == 0.0) return 0.0;
-    {
-        double similarity = dot / sqrt(query_norm * record_norm);
-
-        if (similarity > 1.0) return 1.0;
-        if (similarity < -1.0) return -1.0;
-        return similarity;
-    }
-}
-
-/**
- * Search lexical matches, fuse BM25 and HNSW rankings with RRF, or
- * rerank BM25 candidates by cosine similarity.
- * @param index Built or opened index.
- * @param query UTF-8 search string.
- * @param mode Selected public search strategy.
- * @param options Optional result limit and cosine threshold.
- * @param out_results Receives caller-owned results.
- * @param out_count Receives returned result count.
+ * Retrieve candidates independently with BM25 and HNSW and rank by ordinal.
+ * This baseline fusion will be superseded by the planned evidence evaluator
+ * after relevance and false-positive measurements.
+ * @param index Opened index.
+ * @param query UTF-8 query.
+ * @param options Optional result limit.
+ * @param callback Receives borrowed results and may stop delivery.
+ * @param userdata Passed unchanged to callback.
  * @return KC_EMBDEX_OK or an error status.
  */
-int kc_embdex_search_mode(const kc_embdex_t *index,
-    const char *query, int mode,
+int kc_embdex_search(const kc_embdex_t *index, const char *query,
     const kc_embdex_search_options_t *options,
-    kc_embdex_result_t **out_results, size_t *out_count)
+    kc_embdex_result_fn callback, void *userdata)
 {
-    const size_t default_window = 100;
+    const size_t base_window = 100;
+    const double minimum_similarity = 0.35;
     kc_bm25_result_t *lexical = NULL;
     kc_hnsw_result_t *semantic = NULL;
     kc_embdex_rank_t *ranks = NULL;
-    kc_embdex_result_t *results = NULL;
-    float *embedding = NULL;
     kc_bm25_search_options_t lexical_options = {0};
-    size_t limit = 10, window, lexical_count = 0, semantic_count = 0;
-    size_t rank_count = 0, rank_capacity, dimension = 0, result_count;
-    double threshold = -1.0;
+    float *embedding = NULL;
+    size_t limit = 10, window, capacity, dimension = 0, rank_count = 0;
+    size_t lexical_count = 0, semantic_count = 0, result_count;
     int status = KC_EMBDEX_OK;
 
-    if (out_results != NULL) *out_results = NULL;
-    if (out_count != NULL) *out_count = 0;
-    if (index == NULL || query == NULL || out_results == NULL ||
-        out_count == NULL) return KC_EMBDEX_EINVAL;
-    if (mode != KC_EMBDEX_MODE_SEMANTIC &&
-        mode != KC_EMBDEX_MODE_LEXICAL &&
-        mode != KC_EMBDEX_MODE_HYBRID &&
-        mode != KC_EMBDEX_MODE_RERANK)
+    if (index == NULL || query == NULL || callback == NULL ||
+        index->lexical == NULL || index->graph == NULL)
         return KC_EMBDEX_EINVAL;
+    if (options != NULL && options->limit != NULL)
+        limit = *options->limit;
+    if (limit > INT_MAX) return KC_EMBDEX_EINVAL;
+    if (limit == 0 || index->count == 0 || query[0] == '\0')
+        return KC_EMBDEX_OK;
 
-    if (mode == KC_EMBDEX_MODE_SEMANTIC)
-        return kc_embdex_search(index, query, options, out_results, out_count);
-
-    if (options != NULL) {
-        if (options->limit != NULL) limit = *options->limit;
-        if (options->threshold != NULL) threshold = *options->threshold;
-    }
-    if (limit > INT_MAX || index->lexical == NULL ||
-        (mode != KC_EMBDEX_MODE_LEXICAL &&
-        (!isfinite(threshold) || threshold < -1.0 || threshold > 1.0)))
-        return KC_EMBDEX_EINVAL;
-    if (limit == 0 || index->count == 0) return KC_EMBDEX_OK;
-
-    window = limit > default_window ? limit : default_window;
+    window = limit > base_window ? limit : base_window;
     if (window > index->count) window = index->count;
     if (window > SIZE_MAX / 2 ||
         window * 2 > SIZE_MAX / sizeof(*ranks))
         return KC_EMBDEX_ENOMEM;
-    rank_capacity = window * 2;
-    ranks = (kc_embdex_rank_t *)calloc(rank_capacity, sizeof(*ranks));
+    capacity = window * 2;
+    ranks = (kc_embdex_rank_t *)calloc(capacity, sizeof(*ranks));
     if (ranks == NULL) return KC_EMBDEX_ENOMEM;
 
     lexical_options.limit = &window;
     {
-        int lexical_status = kc_bm25_search(index->lexical, query,
+        int result = kc_bm25_search(index->lexical, query,
             &lexical_options, &lexical, &lexical_count);
 
-        if (lexical_status != KC_BM25_OK) {
-            status = lexical_status == KC_BM25_ENOMEM ?
+        if (result != KC_BM25_OK) {
+            status = result == KC_BM25_ENOMEM ?
                 KC_EMBDEX_ENOMEM : KC_EMBDEX_ELEXICAL;
             goto finished;
         }
     }
-
     for (size_t i = 0; i < lexical_count; i++) {
-        size_t ordinal = lexical[i].ordinal;
-        double score = mode == KC_EMBDEX_MODE_HYBRID ?
-            1.0 / (60.0 + (double)i + 1.0) : lexical[i].score;
-
-        if (ordinal >= index->count) {
-            status = KC_EMBDEX_ELEXICAL;
+        if (lexical[i].ordinal >= index->count) {
+            status = KC_EMBDEX_EINDEX;
             goto finished;
         }
-        status = kc_embdex_rank_add(ranks, &rank_count,
-            rank_capacity, ordinal, score);
+        status = kc_embdex_rank_add(ranks, &rank_count, capacity,
+            lexical[i].ordinal, 1.0 / (61.0 + (double)i));
         if (status != KC_EMBDEX_OK) goto finished;
     }
 
-    if (mode == KC_EMBDEX_MODE_RERANK && rank_count == 0)
+    if (kc_emb_embed(query, &embedding, &dimension) != KC_EMB_OK ||
+        dimension != index->dimension)
+    {
+        status = KC_EMBDEX_EEMBED;
         goto finished;
-
-    if (mode != KC_EMBDEX_MODE_LEXICAL) {
-        if (kc_emb_embed(query, &embedding, &dimension) != KC_EMB_OK ||
-            dimension != index->dimension)
-        {
-            status = KC_EMBDEX_EEMBED;
-            goto finished;
-        }
     }
+    if (kc_hnsw_search(index->graph, embedding, window,
+        minimum_similarity, &semantic, &semantic_count) != KC_HNSW_OK)
+    {
+        status = KC_EMBDEX_EINDEX;
+        goto finished;
+    }
+    for (size_t i = 0; i < semantic_count; i++) {
+        char *end;
+        uintmax_t ordinal = strtoumax(semantic[i].id, &end, 10);
 
-    if (mode == KC_EMBDEX_MODE_HYBRID) {
-        if (kc_hnsw_search(index->graph, embedding, window, threshold,
-            &semantic, &semantic_count) != KC_HNSW_OK)
+        if (semantic[i].id[0] == '\0' || *end != '\0' ||
+            ordinal >= index->count)
         {
             status = KC_EMBDEX_EINDEX;
             goto finished;
         }
-        for (size_t i = 0; i < semantic_count; i++) {
-            char *end;
-            uintmax_t ordinal = strtoumax(semantic[i].id, &end, 10);
-
-            if (semantic[i].id[0] == '\0' || *end != '\0' ||
-                ordinal >= index->count)
-            {
-                status = KC_EMBDEX_EINDEX;
-                goto finished;
-            }
-            status = kc_embdex_rank_add(ranks, &rank_count,
-                rank_capacity, (size_t)ordinal,
-                1.0 / (60.0 + (double)i + 1.0));
-            if (status != KC_EMBDEX_OK) goto finished;
-        }
-    } else if (mode == KC_EMBDEX_MODE_RERANK) {
-        size_t kept = 0;
-
-        for (size_t i = 0; i < rank_count; i++) {
-            double score = kc_embdex_cosine(index, ranks[i].ordinal,
-                embedding);
-
-            if (score < threshold) continue;
-            ranks[kept].ordinal = ranks[i].ordinal;
-            ranks[kept].score = score;
-            kept++;
-        }
-        rank_count = kept;
+        status = kc_embdex_rank_add(ranks, &rank_count, capacity,
+            (size_t)ordinal, 1.0 / (61.0 + (double)i));
+        if (status != KC_EMBDEX_OK) goto finished;
     }
 
     qsort(ranks, rank_count, sizeof(*ranks), kc_embdex_rank_compare);
     result_count = rank_count < limit ? rank_count : limit;
-    if (result_count != 0) {
-        if (result_count > SIZE_MAX / sizeof(*results)) {
-            status = KC_EMBDEX_ENOMEM;
-            goto finished;
-        }
-        results = (kc_embdex_result_t *)calloc(result_count, sizeof(*results));
-        if (results == NULL) {
-            status = KC_EMBDEX_ENOMEM;
-            goto finished;
-        }
-        for (size_t i = 0; i < result_count; i++) {
-            size_t ordinal = ranks[i].ordinal;
+    for (size_t i = 0; i < result_count; i++) {
+        size_t ordinal = ranks[i].ordinal;
+        kc_embdex_result_t result = {
+            index->records[ordinal].id,
+            index->records[ordinal].content,
+            ranks[i].score
+        };
 
-            results[i].id = index->records[ordinal].id;
-            results[i].content = index->records[ordinal].content;
-            results[i].score = ranks[i].score;
-        }
+        if (callback(&result, userdata) != 0) break;
     }
-    *out_results = results;
-    *out_count = result_count;
-    results = NULL;
 
 finished:
-    kc_embdex_free(results);
-    kc_hnsw_free(semantic);
     kc_bm25_free(lexical);
+    kc_hnsw_free(semantic);
     kc_emb_free(embedding);
     free(ranks);
     return status;
-}
-
-/**
- * Return the number of records in a semantic index.
- * @param index Index or NULL.
- * @return Number of records, or zero for NULL.
- */
-size_t kc_embdex_count(const kc_embdex_t *index)
-{
-    return index == NULL ? 0 : index->count;
-}
-
-/**
- * Release search result storage without touching borrowed record strings.
- * @param ptr Result allocation or NULL.
- * @return void
- */
-void kc_embdex_free(void *ptr)
-{
-    free(ptr);
 }
 
 /**
@@ -1054,7 +869,7 @@ const char *kc_embdex_strerror(int status)
         case KC_EMBDEX_EINDEX:
             return "vector index failed";
         case KC_EMBDEX_ESTATE:
-            return "index cannot be saved in its current state";
+            return "invalid index state";
         case KC_EMBDEX_ELEXICAL:
             return "lexical index failed";
         default:
