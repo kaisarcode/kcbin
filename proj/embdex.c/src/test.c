@@ -7,6 +7,11 @@
  * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
 
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && \
+    !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "libembdex.h"
 
 #include <stdio.h>
@@ -24,7 +29,7 @@
 #ifdef __EMSCRIPTEN__
 #define KC_TEST_TOTAL 6
 #else
-#define KC_TEST_TOTAL 8
+#define KC_TEST_TOTAL 9
 #endif
 
 static int kc_test_current = 0;
@@ -306,6 +311,67 @@ static int kc_test_query(void)
 
 #ifndef __EMSCRIPTEN__
 /**
+ * Set or unset the dictionary supplied only during index construction.
+ * @param path Optional dictionary path.
+ * @return Zero on success.
+ */
+static int kc_test_wordmap_env(const char *path)
+{
+#ifdef _WIN32
+    return _putenv_s("KC_EMBDEX_WORDMAP", path == NULL ? "" : path);
+#else
+    return path == NULL ?
+        unsetenv("KC_EMBDEX_WORDMAP") :
+        setenv("KC_EMBDEX_WORDMAP", path, 1);
+#endif
+}
+
+/**
+ * Ensure a dictionary-built mmap index is portable and self-contained.
+ * The dictionary file is removed before opening and querying its index.
+ * @return Zero when the persisted source and mapped lexical indexes work.
+ */
+static int kc_test_wordmap(void)
+{
+    const kc_embdex_document_t documents[] = {
+        {"secret", "guardar contraseñas privadas"},
+        {"garden", "cuidar plantas en el jardín"}
+    };
+    const char *dictionary = "embdex-test-wordmap.tsv";
+    const char *path = "embdex-test-wordmap.bin";
+    kc_embdex_t *index = NULL;
+    kc_embdex_match_test_t result = {0};
+    FILE *file = fopen(dictionary, "wb");
+    int failed = 0;
+
+    remove(path);
+    if (file == NULL) failed = 1;
+    else {
+        failed |= fputs("guardar\tstore\n", file) == EOF;
+        failed |= fputs("claves\tpasswords\n", file) == EOF;
+        failed |= fputs("contraseñas\tpasswords\n", file) == EOF;
+        failed |= fclose(file) != 0;
+    }
+    if (!failed) failed |= kc_test_wordmap_env(dictionary) != 0;
+    if (!failed)
+        failed |= kc_embdex_build(path, documents, 2) != KC_EMBDEX_OK;
+    failed |= kc_test_wordmap_env(NULL) != 0;
+    remove(dictionary);
+    if (!failed) failed |= kc_embdex_open(&index, path) != KC_EMBDEX_OK;
+    if (!failed) {
+        failed |= kc_embdex_search(index, "guardar claves", NULL,
+            kc_test_match, &result) != KC_EMBDEX_OK;
+        failed |= result.count == 0 ||
+            strcmp(result.first_id, "secret") != 0;
+    }
+    kc_embdex_close(index);
+    remove(path);
+    return kc_test_result("wordmap",
+        "opens and searches a mapped bilingual index without its dictionary",
+        failed);
+}
+
+/**
  * Check conventional CLI help and build-version output.
  * @return Zero when help and version operations are self-contained.
  */
@@ -412,6 +478,7 @@ static int kc_test_run(const char *name)
     if (strcmp(name, "relevance") == 0) return kc_test_relevance();
     if (strcmp(name, "query") == 0) return kc_test_query();
 #ifndef __EMSCRIPTEN__
+    if (strcmp(name, "wordmap") == 0) return kc_test_wordmap();
     if (strcmp(name, "cli_info") == 0) return kc_test_cli_info();
     if (strcmp(name, "cli") == 0) return kc_test_cli();
 #endif
@@ -431,7 +498,7 @@ int main(int argc, char **argv)
         "search", "duplicates", "invalid", "format",
         "relevance", "query",
 #ifndef __EMSCRIPTEN__
-        "cli_info", "cli",
+        "wordmap", "cli_info", "cli",
 #endif
     };
     int failed = 0;
