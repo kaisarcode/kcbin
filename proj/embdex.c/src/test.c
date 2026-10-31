@@ -29,7 +29,7 @@
 #ifdef __EMSCRIPTEN__
 #define KC_TEST_TOTAL 7
 #else
-#define KC_TEST_TOTAL 10
+#define KC_TEST_TOTAL 11
 #endif
 
 static int kc_test_current = 0;
@@ -438,6 +438,107 @@ static int kc_test_wordmap(void)
 }
 
 /**
+ * Configure the diagnostic stream only during a test search.
+ * @param path Trace file or NULL to disable tracing.
+ * @return Zero when the environment was updated.
+ */
+static int kc_test_trace_env(const char *path)
+{
+#ifdef _WIN32
+    return _putenv_s("KC_EMBDEX_TRACE", path == NULL ? "" : path);
+#else
+    return path == NULL ?
+        unsetenv("KC_EMBDEX_TRACE") :
+        setenv("KC_EMBDEX_TRACE", path, 1);
+#endif
+}
+
+/**
+ * Check how many distinct semantic embeddings the query evaluated.
+ * @param path JSONL evidence trace for one search.
+ * @param count Required embeddings for each association trace.
+ * @return Zero when records exist and all report the requested count.
+ */
+static int kc_test_trace_embeddings(const char *path, size_t count)
+{
+    char expected[64], line[8192];
+    FILE *file = fopen(path, "rb");
+    int found = 0, failed = 0;
+
+    if (file == NULL) return 1;
+    if (snprintf(expected, sizeof(expected),
+        "\"variants_evaluated\":%zu,", count) < 0) {
+        fclose(file);
+        return 1;
+    }
+    while (fgets(line, sizeof(line), file) != NULL) {
+        found++;
+        if (strstr(line, expected) == NULL) failed = 1;
+    }
+    failed |= ferror(file) != 0;
+    failed |= fclose(file) != 0;
+    return failed || found == 0;
+}
+
+/**
+ * Confirm that complete literal matches bypass inference even for Top K,
+ * and a partially unmatched query still enters the semantic fallback.
+ * @return Zero when the fallback gate matches the expected behavior.
+ */
+static int kc_test_semantic_fallback(void)
+{
+    const kc_embdex_document_t documents[] = {
+        {"want", "quiero"},
+        {"drink", "tomar"},
+        {"water", "agua"},
+        {"drink-water", "tomar agua"}
+    };
+    const char *index_path = "embdex-test-fallback.bin";
+    const char *trace_path = "embdex-test-fallback.jsonl";
+    kc_embdex_t *index = NULL;
+    kc_test_composition_t results = {0};
+    int failed = 0;
+
+    remove(index_path);
+    remove(trace_path);
+    failed |= kc_embdex_build(index_path, documents, 4) != KC_EMBDEX_OK;
+    if (!failed)
+        failed |= kc_embdex_open(&index, index_path) != KC_EMBDEX_OK;
+    if (!failed) {
+        failed |= kc_test_trace_env(trace_path) != 0;
+        if (!failed) {
+            /* A complete query made of several associations, Top K > 1. */
+            failed |= kc_embdex_search(index, "quiero tomar agua", NULL,
+                kc_test_composition_receive, &results) != KC_EMBDEX_OK;
+            failed |= kc_test_trace_embeddings(trace_path, 0);
+        }
+        remove(trace_path);
+        results = (kc_test_composition_t){0};
+        if (!failed) {
+            /* A single literal term also bypasses the model. */
+            failed |= kc_embdex_search(index, "tomar", NULL,
+                kc_test_composition_receive, &results) != KC_EMBDEX_OK;
+            failed |= kc_test_trace_embeddings(trace_path, 0);
+        }
+        remove(trace_path);
+        results = (kc_test_composition_t){0};
+        if (!failed) {
+            /* Missing terms require semantic retrieval. */
+            failed |= kc_embdex_search(index, "quiero tomar desconocido",
+                NULL, kc_test_composition_receive,
+                &results) != KC_EMBDEX_OK;
+            failed |= kc_test_trace_embeddings(trace_path, 1);
+        }
+    }
+    failed |= kc_test_trace_env(NULL) != 0;
+    kc_embdex_close(index);
+    remove(index_path);
+    remove(trace_path);
+    return kc_test_result("semantic_fallback",
+        "runs NLP only when literal coverage is insufficient", failed);
+}
+
+/**
  * Check conventional CLI help and build-version output.
  * @return Zero when help and version operations are self-contained.
  */
@@ -580,6 +681,8 @@ static int kc_test_run(const char *name)
     if (strcmp(name, "query") == 0) return kc_test_query();
 #ifndef __EMSCRIPTEN__
     if (strcmp(name, "wordmap") == 0) return kc_test_wordmap();
+    if (strcmp(name, "semantic_fallback") == 0)
+        return kc_test_semantic_fallback();
     if (strcmp(name, "cli_info") == 0) return kc_test_cli_info();
     if (strcmp(name, "cli") == 0) return kc_test_cli();
 #endif
@@ -599,7 +702,7 @@ int main(int argc, char **argv)
         "search", "duplicates", "invalid", "format",
         "relevance", "composition", "query",
 #ifndef __EMSCRIPTEN__
-        "wordmap", "cli_info", "cli",
+        "wordmap", "semantic_fallback", "cli_info", "cli",
 #endif
     };
     int failed = 0;
