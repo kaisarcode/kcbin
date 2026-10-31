@@ -4,8 +4,8 @@ kcbin is the level-1 (LV1) composition layer built from autonomous level-0 (LV0)
 
 ## Levels
 
-- **LV0 — kclib:** independent primitive capabilities; no dependencies on other kclibs.
-- **LV1 — kcbin:** explicit compositions of LV0 primitives; no dependencies on other LV1 tools.
+- **LV0 - kclib:** independent primitive capabilities; no dependencies on other kclibs.
+- **LV1 - kcbin:** explicit compositions of LV0 primitives; no dependencies on other LV1 tools.
 - **Higher levels:** consumers and applications may combine tools from any lower level without creating cycles.
 
 For a project P with KaisarCode dependencies D, its effective level is `1 + max(level(D))`. Dependencies always point downward, and using an LV0 capability directly is allowed at every higher level. The levels describe software composition, not commercial status, UI presence, or whether an artifact is a binary or a shared library.
