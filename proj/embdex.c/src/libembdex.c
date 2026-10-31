@@ -1086,6 +1086,9 @@ typedef struct {
     int semantic_found;
     int semantic_measured;
     size_t semantic_rank;
+    size_t semantic_variant;
+    size_t variants_evaluated;
+    double semantic_threshold;
     int full_phrase;
     int accepted;
     size_t final_rank;
@@ -1556,13 +1559,53 @@ static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
             item->accepted ? "true" : "false");
         if (item->accepted) fprintf(file, "%.9g", item->score);
         else fputs("null", file);
-        fprintf(file, ",\"semantic_rank\":%zu,\"final_rank\":%zu,\"reason\":",
-            item->semantic_rank, item->final_rank);
+        fprintf(file, ",\"semantic_rank\":%zu,\"variant\":%zu,"
+            "\"variants_evaluated\":%zu,\"candidate_threshold\":%.9g,"
+            "\"final_rank\":%zu,\"reason\":",
+            item->semantic_rank, item->semantic_variant,
+            item->variants_evaluated, item->semantic_threshold,
+            item->final_rank);
         kc_embdex_json_string(file,
             item->reason == NULL ? "not_discovered" : item->reason);
         fputs("}\n", file);
     }
     fclose(file);
+}
+
+/**
+ * Bound the number of heuristic word-substitution variants per query.
+ * The baseline experiment compares one translation; ambiguous queries
+ * can be tested with up to sixteen deterministic word combinations.
+ * @param index Index with a previously loaded word map.
+ * @param tokens Already-normalized query words.
+ * @param count Receives the number of model calls.
+ * @return KC_EMBDEX_OK or EINVAL for an invalid budget.
+ */
+static int kc_embdex_variant_count(const kc_embdex_t *index,
+    const kc_embdex_tokens_t *tokens, size_t *count)
+{
+    const char *configured = getenv("KC_EMBDEX_WORDMAP_VARIANTS");
+    size_t ambiguous = 0;
+    size_t budget = 8;
+
+    *count = 1;
+    if (index->word_count == 0) return KC_EMBDEX_OK;
+    if (configured != NULL && configured[0] != '\0') {
+        char *end = NULL;
+        unsigned long value = strtoul(configured, &end, 10);
+
+        if (end == configured || *end != '\0' || value < 1 ||
+            value > 16) return KC_EMBDEX_EINVAL;
+        budget = (size_t)value;
+    }
+    for (size_t i = 0; i < tokens->count; i++) {
+        size_t alternatives = 0;
+
+        kc_embdex_word_find(index, tokens->value[i], &alternatives);
+        if (alternatives > 1) ambiguous++;
+    }
+    if (ambiguous != 0) *count = budget;
+    return KC_EMBDEX_OK;
 }
 
 /**
@@ -1584,6 +1627,8 @@ static const char *kc_embdex_accept(const kc_embdex_evidence_t *item,
 {
     double similarity = item->semantic_found ? item->semantic : 0;
 
+    if (item->semantic_measured && item->semantic_threshold > 0)
+        semantic_floor = item->semantic_threshold;
     if (!truncated && item->full_phrase)
         return "complete_phrase";
     if (!truncated && coverage >= 0.80 &&
@@ -1663,7 +1708,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     char *joined = NULL;
     float *embedding = NULL;
     size_t dimension = 0, limit = 10, window, lexical_count = 0;
-    size_t semantic_count = 0, rank_count = 0;
+    size_t semantic_count = 0, rank_count = 0, variants = 1;
     double weights[KC_EMBDEX_QUERY_TOKENS] = {0};
     double total_weight = 0;
     int status = KC_EMBDEX_OK;
@@ -1835,69 +1880,96 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         free(document.text);
     }
 
+    status = kc_embdex_variant_count(index, &tokens, &variants);
+    if (status != KC_EMBDEX_OK) goto finished;
     {
         int exact_full = 0;
 
         for (size_t i = 0; i < index->count; i++)
             exact_full |= evidence[i].full_phrase;
         if (tokens.truncated || !exact_full || limit != 1) {
-            status = kc_embdex_embed_text(index, query, &embedding, &dimension);
-            if (status != KC_EMBDEX_OK) goto finished;
-            if (dimension != index->dimension) {
-                status = KC_EMBDEX_EEMBED;
-                goto finished;
-            }
-            semantic_only_floor = kc_embdex_semantic_threshold(index,
-                embedding);
-            if (index->graph == NULL) {
-                for (size_t i = 0; i < index->count; i++) {
-                    double cosine = kc_embdex_cosine(index, i, embedding);
+            for (size_t variant = 0; variant < variants; variant++) {
+                double candidate_floor;
 
-                    evidence[i].semantic = cosine;
-                    evidence[i].semantic_measured = 1;
-                    if (cosine >= semantic_floor)
-                        evidence[i].semantic_found = 1;
-                }
-                for (size_t i = 0; i < index->count; i++) {
-                    ranks[i].ordinal = i;
-                    ranks[i].score = evidence[i].semantic;
-                }
-                qsort(ranks, index->count, sizeof(*ranks),
-                    kc_embdex_rank_compare);
-                for (size_t i = 0; i < index->count; i++)
-                    evidence[ranks[i].ordinal].semantic_rank = i + 1;
-            } else {
-                int result = kc_hnsw_search(index->graph,
-                    embedding, window, semantic_floor,
-                    &semantic, &semantic_count);
-
-                if (result != KC_HNSW_OK) {
-                    status = KC_EMBDEX_EINDEX;
+                status = kc_embdex_embed_text(index, query, variant,
+                    &embedding, &dimension);
+                if (status != KC_EMBDEX_OK) goto finished;
+                if (dimension != index->dimension) {
+                    status = KC_EMBDEX_EEMBED;
                     goto finished;
                 }
-                if (semantic_count > index->count) {
-                    status = KC_EMBDEX_EINDEX;
-                    goto finished;
-                }
-                for (size_t i = 0; i < semantic_count; i++) {
-                    char *end;
-                    uintmax_t ordinal = strtoumax(semantic[i].id, &end, 10);
+                candidate_floor = kc_embdex_semantic_threshold(index,
+                    embedding);
+                if (index->graph == NULL) {
+                    for (size_t i = 0; i < index->count; i++) {
+                        double cosine = kc_embdex_cosine(index, i, embedding);
+                        kc_embdex_evidence_t *item = &evidence[i];
 
-                    if (semantic[i].id[0] == '\0' || *end != '\0' ||
-                        ordinal >= index->count)
-                    {
+                        if (!item->semantic_measured ||
+                            cosine > item->semantic)
+                        {
+                            item->semantic = cosine;
+                            item->semantic_measured = 1;
+                            item->semantic_found = cosine >= semantic_floor;
+                            item->semantic_threshold = candidate_floor;
+                            item->semantic_variant = variant;
+                        }
+                    }
+                } else {
+                    int result = kc_hnsw_search(index->graph,
+                        embedding, window, semantic_floor,
+                        &semantic, &semantic_count);
+
+                    if (result != KC_HNSW_OK) {
                         status = KC_EMBDEX_EINDEX;
                         goto finished;
                     }
-                    evidence[(size_t)ordinal].semantic = semantic[i].score;
-                    evidence[(size_t)ordinal].semantic_measured = 1;
-                    evidence[(size_t)ordinal].semantic_found = 1;
-                    ranks[i].ordinal = (size_t)ordinal;
-                    ranks[i].score = semantic[i].score;
+                    if (semantic_count > index->count) {
+                        status = KC_EMBDEX_EINDEX;
+                        goto finished;
+                    }
+                    for (size_t i = 0; i < semantic_count; i++) {
+                        char *end = NULL;
+                        uintmax_t ordinal = strtoumax(semantic[i].id,
+                            &end, 10);
+                        kc_embdex_evidence_t *item;
+
+                        if (semantic[i].id[0] == '\0' || *end != '\0' ||
+                            ordinal >= index->count)
+                        {
+                            status = KC_EMBDEX_EINDEX;
+                            goto finished;
+                        }
+                        item = &evidence[(size_t)ordinal];
+                        if (!item->semantic_measured ||
+                            semantic[i].score > item->semantic)
+                        {
+                            item->semantic = semantic[i].score;
+                            item->semantic_measured = 1;
+                            item->semantic_found = 1;
+                            item->semantic_threshold = candidate_floor;
+                            item->semantic_variant = variant;
+                        }
+                    }
+                    kc_hnsw_free(semantic);
+                    semantic = NULL;
                 }
-                qsort(ranks, semantic_count, sizeof(*ranks),
+                kc_emb_free(embedding);
+                embedding = NULL;
+                dimension = 0;
+            }
+            {
+                size_t candidates = 0;
+
+                for (size_t i = 0; i < index->count; i++) {
+                    if (!evidence[i].semantic_measured) continue;
+                    ranks[candidates].ordinal = i;
+                    ranks[candidates++].score = evidence[i].semantic;
+                    evidence[i].variants_evaluated = variants;
+                }
+                qsort(ranks, candidates, sizeof(*ranks),
                     kc_embdex_rank_compare);
-                for (size_t i = 0; i < semantic_count; i++)
+                for (size_t i = 0; i < candidates; i++)
                     evidence[ranks[i].ordinal].semantic_rank = i + 1;
             }
         }
