@@ -47,6 +47,12 @@ typedef struct {
 } kc_embdex_word_t;
 
 typedef struct {
+    size_t count;
+    size_t ambiguous;
+    int exhaustive;
+} kc_embdex_variant_plan_t;
+
+typedef struct {
     const char *id;
     const char *content;
     const unsigned char *encoded;
@@ -352,10 +358,23 @@ static size_t kc_embdex_word_find(const kc_embdex_t *index,
  * @param choices Number of possible translations for the word.
  * @return Translation ordinal.
  */
-static size_t kc_embdex_variant_choice(size_t variant,
-    size_t stride, size_t choices)
+static size_t kc_embdex_variant_choice(const kc_embdex_variant_plan_t *plan,
+    size_t variant, size_t occurrence, size_t stride, size_t choices)
 {
-    return choices > 1 ? (variant / stride) % choices : 0;
+    size_t bits = 0, mask, secondary;
+
+    if (variant == 0 || choices <= 1) return 0;
+    if (plan == NULL || plan->exhaustive)
+        return (variant / stride) % choices;
+    /* Four staggered bits cover the full sentence within 16 variants. */
+    while (((size_t)1 << bits) < plan->count) bits++;
+    mask = (size_t)1 << (occurrence % bits);
+    if (occurrence >= bits && bits > 1) {
+        secondary = (occurrence + occurrence / bits) % bits;
+        mask |= (size_t)1 << secondary;
+    }
+    if ((variant & mask) == 0) return 0;
+    return 1 + ((variant + occurrence) % (choices - 1));
 }
 
 /**
@@ -530,10 +549,11 @@ static int kc_embdex_word_append(char **buffer, size_t *used,
  * @return KC_EMBDEX_OK or an embedding, normalization or memory error.
  */
 static int kc_embdex_transform_text(const kc_embdex_t *index,
-    const char *text, size_t variant, char **output)
+    const char *text, size_t variant,
+    const kc_embdex_variant_plan_t *plan, char **output)
 {
     size_t used = 0, capacity = 0, size = strlen(text), offset = 0;
-    size_t stride = 1;
+    size_t stride = 1, ambiguous = 0;
     char *mapped = NULL;
     int status = KC_EMBDEX_OK;
 
@@ -568,11 +588,12 @@ static int kc_embdex_transform_text(const kc_embdex_t *index,
                 first = kc_embdex_word_find(index, normalized,
                     &alternatives);
                 if (alternatives != 0) {
-                    size_t choice = kc_embdex_variant_choice(variant,
-                        stride, alternatives);
+                    size_t choice = kc_embdex_variant_choice(plan,
+                        variant, ambiguous, stride, alternatives);
 
                     replacement = index->wordmap[first + choice].replacement;
                     if (alternatives > 1) {
+                        ambiguous++;
                         stride = stride > 16 / alternatives ?
                             16 : stride * alternatives;
                     }
@@ -618,7 +639,8 @@ static int kc_embdex_embed_text(const kc_embdex_t *index,
     if (index->word_count == 0)
         return kc_emb_embed(text, vector, dimension) == KC_EMB_OK ?
             KC_EMBDEX_OK : KC_EMBDEX_EEMBED;
-    status = kc_embdex_transform_text(index, text, variant, &mapped);
+    status = kc_embdex_transform_text(index, text, variant,
+        NULL, &mapped);
     if (status != KC_EMBDEX_OK) return status;
     kc_embdex_wordmap_trace(text, mapped, variant);
     status = kc_emb_embed(mapped, vector, dimension) == KC_EMB_OK ?
@@ -1681,13 +1703,15 @@ static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
  * @return KC_EMBDEX_OK or EINVAL for an invalid budget.
  */
 static int kc_embdex_variant_count(const kc_embdex_t *index,
-    const kc_embdex_tokens_t *tokens, size_t *count)
+    const kc_embdex_tokens_t *tokens, kc_embdex_variant_plan_t *plan)
 {
     const char *configured = getenv("KC_EMBDEX_WORDMAP_VARIANTS");
     size_t combinations = 1;
     size_t budget = 8;
 
-    *count = 1;
+    plan->count = 1;
+    plan->ambiguous = 0;
+    plan->exhaustive = 1;
     if (index->word_count == 0) return KC_EMBDEX_OK;
     if (configured != NULL && configured[0] != '\0') {
         char *end = NULL;
@@ -1702,11 +1726,13 @@ static int kc_embdex_variant_count(const kc_embdex_t *index,
 
         kc_embdex_word_find(index, tokens->value[i], &alternatives);
         if (alternatives > 1) {
+            plan->ambiguous++;
             combinations = combinations > budget / alternatives ?
-                budget : combinations * alternatives;
+                budget + 1 : combinations * alternatives;
         }
     }
-    *count = combinations;
+    plan->count = combinations > budget ? budget : combinations;
+    plan->exhaustive = combinations <= budget;
     return KC_EMBDEX_OK;
 }
 
@@ -1811,6 +1837,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     float *embedding = NULL;
     size_t dimension = 0, limit = 10, window, lexical_count = 0;
     size_t semantic_count = 0, rank_count = 0, variants = 1;
+    kc_embdex_variant_plan_t variant_plan = {0};
     size_t unique_variants = 0;
     char *variant_text[16] = {0};
     double *variant_scores = NULL;
@@ -1983,8 +2010,9 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         free(document.text);
     }
 
-    status = kc_embdex_variant_count(index, &tokens, &variants);
+    status = kc_embdex_variant_count(index, &tokens, &variant_plan);
     if (status != KC_EMBDEX_OK) goto finished;
+    variants = variant_plan.count;
     if (getenv("KC_EMBDEX_TRACE") != NULL &&
         getenv("KC_EMBDEX_TRACE")[0] != '\0')
     {
@@ -2015,7 +2043,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
 
                 if (index->word_count != 0) {
                     status = kc_embdex_transform_text(index, query,
-                        variant, &mapped);
+                        variant, &variant_plan, &mapped);
                     if (status != KC_EMBDEX_OK) goto finished;
                     for (size_t k = 0; k < unique_variants; k++) {
                         if (strcmp(mapped, variant_text[k]) == 0) {
