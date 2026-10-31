@@ -1663,16 +1663,17 @@ static uint64_t kc_embdex_literal_starts(const kc_embdex_tokens_t *tokens,
  * @param evidence Per-association evidence and matching span bitsets.
  * @param count Association count.
  * @param token_count Query length, at most KC_EMBDEX_QUERY_TOKENS.
- * @return None. Winning association groups receive a rank of one or two.
+ * @return One when a complete literal segmentation exists; zero otherwise.
+ * Winning association groups receive a rank of one or two.
  */
-static void kc_embdex_cover_rank(kc_embdex_evidence_t *evidence,
+static int kc_embdex_cover_rank(kc_embdex_evidence_t *evidence,
     size_t count, size_t token_count)
 {
     kc_embdex_cover_t best[KC_EMBDEX_QUERY_TOKENS + 1]
         [KC_EMBDEX_COVER_PATHS] = {{{0}}};
 
     if (token_count < 2 || token_count > KC_EMBDEX_QUERY_TOKENS)
-        return;
+        return 0;
     best[token_count][0].valid = 1;
     for (size_t position = token_count; position-- > 0;) {
         for (size_t i = 0; i < count; i++) {
@@ -1738,6 +1739,7 @@ static void kc_embdex_cover_rank(kc_embdex_evidence_t *evidence,
             slot = edge.next_slot;
         }
     }
+    return best[0][0].valid;
 }
 
 /**
@@ -2383,6 +2385,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     double *variant_scores = NULL;
     double weights[KC_EMBDEX_QUERY_TOKENS] = {0};
     double total_weight = 0;
+    int literal_sufficient = 0;
     int status = KC_EMBDEX_OK;
 
     if (index == NULL || query == NULL || callback == NULL ||
@@ -2635,7 +2638,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     }
 
     if (!tokens.truncated)
-        kc_embdex_cover_rank(evidence, index->count, tokens.count);
+        literal_sufficient = kc_embdex_cover_rank(
+            evidence, index->count, tokens.count);
 
     status = kc_embdex_variant_count(index, &tokens, &variant_plan);
     if (status != KC_EMBDEX_OK) goto finished;
@@ -2658,11 +2662,15 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
             variant_scores[i] = NAN;
     }
     {
-        int exact_full = 0;
-
-        for (size_t i = 0; i < index->count; i++)
-            exact_full |= evidence[i].full_phrase;
-        if (tokens.truncated || !exact_full || limit != 1) {
+        /* Embeddings are a fallback, not mandatory for every query.
+         * A whole phrase or complete literal segmentation already
+         * supplies sufficient evidence regardless of result limit. */
+        if (!tokens.truncated) {
+            for (size_t i = 0; i < index->count; i++)
+                if (evidence[i].full_phrase)
+                    literal_sufficient = 1;
+        }
+        if (tokens.truncated || !literal_sufficient) {
             for (size_t variant = 0; variant < variants; variant++) {
                 double candidate_floor;
                 char *mapped = NULL;
