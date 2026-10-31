@@ -27,9 +27,9 @@
 #endif
 
 #ifdef __EMSCRIPTEN__
-#define KC_TEST_TOTAL 7
+#define KC_TEST_TOTAL 8
 #else
-#define KC_TEST_TOTAL 11
+#define KC_TEST_TOTAL 12
 #endif
 
 static int kc_test_current = 0;
@@ -418,6 +418,80 @@ static int kc_test_query(void)
         "does not match empty text and rejects malformed UTF-8", failed);
 }
 
+typedef struct {
+    size_t next;
+    unsigned phase;
+    int failed;
+} kc_test_progress_t;
+
+/**
+ * Verify the order and counters of optional build progress notifications.
+ * @param stage Current build phase.
+ * @param completed Completed embedding count.
+ * @param total Total embedding count.
+ * @param userdata Mutable test observations.
+ * @return None.
+ */
+static void kc_test_progress_receive(kc_embdex_build_stage_t stage,
+    size_t completed, size_t total, void *userdata)
+{
+    kc_test_progress_t *state = (kc_test_progress_t *)userdata;
+
+    if (stage == KC_EMBDEX_BUILD_PREPARE) {
+        if (state->phase != 0 || completed != 0 || total != 0)
+            state->failed = 1;
+        state->phase = 1;
+    } else if (stage == KC_EMBDEX_BUILD_EMBED) {
+        if (state->phase != 1 || total != 3 ||
+            completed != state->next)
+            state->failed = 1;
+        state->next++;
+    } else if (stage == KC_EMBDEX_BUILD_SAVE) {
+        if (state->phase != 1 || state->next != 4 ||
+            completed != 0 || total != 0)
+            state->failed = 1;
+        state->phase = 2;
+    } else if (stage == KC_EMBDEX_BUILD_DONE) {
+        if (state->phase != 2 || completed != 0 || total != 0)
+            state->failed = 1;
+        state->phase = 3;
+    } else {
+        state->failed = 1;
+    }
+}
+
+/**
+ * Confirm that build progress counts completed embeddings and reports save.
+ * @return Zero when the callback receives complete, ordered build progress.
+ */
+static int kc_test_progress(void)
+{
+    const kc_embdex_document_t documents[] = {
+        {"one", "first association"},
+        {"two", "second association"},
+        {"three", "third association"}
+    };
+    const char *path = "embdex-test-progress.bin";
+    kc_test_progress_t state = {0};
+    kc_embdex_build_options_t options = {
+        .progress = kc_test_progress_receive,
+        .userdata = &state
+    };
+    kc_embdex_t *index = NULL;
+    int failed;
+
+    remove(path);
+    failed = kc_embdex_build_with_dictionaries(path, documents, 3,
+        NULL, 0, &options) != KC_EMBDEX_OK;
+    failed |= state.failed || state.phase != 3 || state.next != 4;
+    if (!failed)
+        failed |= kc_embdex_open(&index, path) != KC_EMBDEX_OK;
+    kc_embdex_close(index);
+    remove(path);
+    return kc_test_result("progress",
+        "reports preparation, embedding counts, save and completion", failed);
+}
+
 #ifndef __EMSCRIPTEN__
 /**
  * Ensure several independent dictionaries compile into a self-contained map.
@@ -457,7 +531,7 @@ static int kc_test_wordmap(void)
     }
     if (!failed)
         failed |= kc_embdex_build_with_dictionaries(path, documents, 2,
-            dictionaries, 2) != KC_EMBDEX_OK;
+            dictionaries, 2, NULL) != KC_EMBDEX_OK;
     remove(dictionary_a);
     remove(dictionary_b);
     if (!failed) failed |= kc_embdex_open(&index, path) != KC_EMBDEX_OK;
@@ -602,7 +676,8 @@ static int kc_test_cli_info(void)
     char line[512];
     unsigned long long version = 0;
     char extra;
-    int failed = 0, usage = 0, commands = 0, options = 0, modes = 0;
+    int failed = 0, usage = 0, commands = 0, options = 0;
+    int progress = 0, modes = 0;
 
     failed |= system(KC_TEST_CLI " --help > embdex-cli-info.txt 2>&1") != 0;
     file = fopen("embdex-cli-info.txt", "r");
@@ -612,12 +687,13 @@ static int kc_test_cli_info(void)
             usage |= strstr(line, "Usage: ") != NULL;
             commands |= strstr(line, "Commands:") != NULL;
             options |= strstr(line, "Options:") != NULL;
+            progress |= strstr(line, "--progress") != NULL;
             modes |= strstr(line, "--mode") != NULL;
         }
         failed |= ferror(file) != 0;
         failed |= fclose(file) != 0;
     }
-    failed |= !usage || !commands || !options || modes;
+    failed |= !usage || !commands || !options || !progress || modes;
     failed |= system(KC_TEST_CLI " --version > embdex-cli-info.txt 2>&1") != 0;
     file = fopen("embdex-cli-info.txt", "r");
     if (file == NULL) failed = 1;
@@ -655,8 +731,17 @@ static int kc_test_cli(void)
     }
     if (!failed) failed |= system(
         KC_TEST_CLI " build embdex-cli-index.bin "
-        "-i embdex-cli-input.tsv > " KC_TEST_NULL " 2>&1"
+        "-i embdex-cli-input.tsv > embdex-cli-silent.txt 2>&1"
     ) != 0;
+    if (!failed) {
+        file = fopen("embdex-cli-silent.txt", "r");
+        if (file == NULL) failed = 1;
+        else {
+            failed |= fgetc(file) != EOF || ferror(file) != 0;
+            failed |= fclose(file) != 0;
+        }
+    }
+    remove("embdex-cli-silent.txt");
     if (!failed) failed |= system(
         KC_TEST_CLI " search embdex-cli-index.bin authentication "
         "--limit 2 > embdex-cli-output.tsv 2>&1"
@@ -691,8 +776,32 @@ static int kc_test_cli(void)
     if (!failed) failed |= system(
         KC_TEST_CLI " build embdex-cli-index.bin "
         "-i embdex-cli-input.tsv -d embdex-cli-dict-a.tsv "
-        "--dictionary embdex-cli-dict-b.tsv > " KC_TEST_NULL " 2>&1"
+        "--dictionary embdex-cli-dict-b.tsv --progress "
+        "> " KC_TEST_NULL " 2> embdex-cli-progress.txt"
     ) != 0;
+    if (!failed) {
+        int prepare = 0, embed_start = 0, embed_end = 0;
+        int save = 0, done = 0;
+
+        file = fopen("embdex-cli-progress.txt", "r");
+        if (file == NULL) failed = 1;
+        else {
+            while (fgets(line, sizeof(line), file) != NULL) {
+                prepare |= strcmp(line, "embdex: preparing\n") == 0;
+                embed_start |= strcmp(line,
+                    "embdex: embeddings 0% (0/2)\n") == 0;
+                embed_end |= strcmp(line,
+                    "embdex: embeddings 100% (2/2)\n") == 0;
+                save |= strcmp(line, "embdex: saving\n") == 0;
+                done |= strcmp(line, "embdex: done\n") == 0;
+            }
+            failed |= ferror(file) != 0;
+            failed |= fclose(file) != 0;
+            failed |= !prepare || !embed_start || !embed_end ||
+                !save || !done;
+        }
+    }
+    remove("embdex-cli-progress.txt");
     remove("embdex-cli-dict-a.tsv");
     remove("embdex-cli-dict-b.tsv");
     if (!failed) failed |= system(
@@ -733,6 +842,7 @@ static int kc_test_run(const char *name)
     if (strcmp(name, "relevance") == 0) return kc_test_relevance();
     if (strcmp(name, "composition") == 0) return kc_test_composition();
     if (strcmp(name, "query") == 0) return kc_test_query();
+    if (strcmp(name, "progress") == 0) return kc_test_progress();
 #ifndef __EMSCRIPTEN__
     if (strcmp(name, "wordmap") == 0) return kc_test_wordmap();
     if (strcmp(name, "semantic_fallback") == 0)
@@ -754,7 +864,7 @@ int main(int argc, char **argv)
 {
     const char *cases[] = {
         "search", "duplicates", "invalid", "format",
-        "relevance", "composition", "query",
+        "relevance", "composition", "query", "progress",
 #ifndef __EMSCRIPTEN__
         "wordmap", "semantic_fallback", "cli_info", "cli",
 #endif
