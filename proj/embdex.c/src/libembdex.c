@@ -207,7 +207,11 @@ static int kc_embdex_model_identity(char tag[KC_EMBDEX_MODEL_SIZE])
         digest ^= (unsigned char)ch;
         digest *= UINT32_C(16777619);
     }
-    if (ferror(file) || fclose(file) != 0) return KC_EMBDEX_EIO;
+    {
+        int failed = ferror(file);
+
+        if (fclose(file) != 0 || failed) return KC_EMBDEX_EIO;
+    }
     memset(tag, 0, KC_EMBDEX_MODEL_SIZE);
     if (snprintf(tag, KC_EMBDEX_MODEL_SIZE, "%s+%08" PRIx32,
         kc_embdex_model, digest) >= KC_EMBDEX_MODEL_SIZE)
@@ -475,12 +479,16 @@ static int kc_embdex_embed_text(const kc_embdex_t *index,
                 end++;
             status = kc_embdex_word_normalize(index,
                 text + offset, end - offset, &normalized);
-            if (status != KC_EMBDEX_OK) break;
-            key.source = normalized;
-            hit = (kc_embdex_word_t *)bsearch(&key,
-                index->wordmap, index->word_count,
-                sizeof(*index->wordmap), kc_embdex_word_compare);
-            if (hit != NULL) replacement = hit->replacement;
+            /* Words outside BM25's normalized vocabulary stay unchanged. */
+            if (status == KC_EMBDEX_EFORMAT) status = KC_EMBDEX_OK;
+            else if (status != KC_EMBDEX_OK) break;
+            if (normalized != NULL) {
+                key.source = normalized;
+                hit = (kc_embdex_word_t *)bsearch(&key,
+                    index->wordmap, index->word_count,
+                    sizeof(*index->wordmap), kc_embdex_word_compare);
+                if (hit != NULL) replacement = hit->replacement;
+            }
         }
         length = normalized == NULL || replacement == text + offset ?
             end - offset : strlen(replacement);
