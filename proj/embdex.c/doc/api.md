@@ -77,13 +77,13 @@ Search automatically combines independent candidate discovery:
 
 - BM25 ranks matching terms from the full query.
 - The saved BM25 vocabulary supplies normalized exact term matches and
-  postings, with no separate dictionary or Unicode analyzer.
+    postings, with no separate dictionary or Unicode analyzer.
 - Unmatched terms may be compared with indexed words by bounded Unicode
-  Levenshtein distance. Short terms and ambiguous single-word corrections
-  are rejected.
+    Levenshtein distance. Short terms and ambiguous single-word corrections
+    are rejected.
 - libngram finds complete normalized phrases and overlapping word windows.
 - libemb obtains one embedding for queries requiring semantic retrieval.
-  Cosine similarity scans small indexes directly; HNSW handles larger ones.
+    Cosine similarity scans small indexes directly; HNSW handles larger ones.
 
 All evidence is accumulated under the internal document ordinal. Exact
 phrase coverage, distinct matched query positions, spelling uncertainty,
@@ -106,7 +106,6 @@ checked for valid UTF-8 before lexical retrieval.
 
 Indexes up to 256 associations use exact cosine and skip a resident
 HNSW graph; larger indexes construct HNSW at open time.
-
 
 ## CLI
 
