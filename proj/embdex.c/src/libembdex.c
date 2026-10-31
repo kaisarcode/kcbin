@@ -68,6 +68,10 @@ struct kc_embdex {
     char model_tag[KC_EMBDEX_MODEL_SIZE];
 };
 
+static void kc_embdex_wordmap_trace(const char *original,
+    const char *mapped, size_t variant);
+
+
 /**
  * Check whether a bounded slice fits in an encoded buffer.
  * @param size Total buffer size.
@@ -582,10 +586,13 @@ static int kc_embdex_embed_text(const kc_embdex_t *index,
         if (status != KC_EMBDEX_OK) break;
         offset = end;
     }
-    if (status == KC_EMBDEX_OK)
+    if (status == KC_EMBDEX_OK) {
+        kc_embdex_wordmap_trace(text, mapped == NULL ? text : mapped,
+            variant);
         status = kc_emb_embed(mapped == NULL ? text : mapped,
             vector, dimension) == KC_EMB_OK ?
             KC_EMBDEX_OK : KC_EMBDEX_EEMBED;
+    }
     free(mapped);
     return status;
 }
@@ -1534,6 +1541,32 @@ static void kc_embdex_json_string(FILE *file, const char *value)
         }
     }
     fputc('"', file);
+}
+
+/**
+ * Log the actual pseudo-English text supplied to libemb for each variant.
+ * Enabled only when KC_EMBDEX_WORDMAP_TRACE points to a writable JSONL file.
+ * This trace includes original content and must not be used for production.
+ * @param original Source text.
+ * @param mapped Literal word substitutions, preserving original word order.
+ * @param variant Index of the chosen word combination.
+ * @return None; trace I/O never affects embedding success.
+ */
+static void kc_embdex_wordmap_trace(const char *original,
+    const char *mapped, size_t variant)
+{
+    const char *path = getenv("KC_EMBDEX_WORDMAP_TRACE");
+    FILE *file;
+
+    if (path == NULL || path[0] == '\0') return;
+    file = fopen(path, "a");
+    if (file == NULL) return;
+    fputs("{\"original\":", file);
+    kc_embdex_json_string(file, original);
+    fputs(",\"mapped\":", file);
+    kc_embdex_json_string(file, mapped);
+    fprintf(file, ",\"variant\":%zu}\n", variant);
+    fclose(file);
 }
 
 /**
