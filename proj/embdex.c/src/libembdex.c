@@ -673,6 +673,7 @@ typedef struct {
     char *value[KC_EMBDEX_QUERY_TOKENS];
     size_t count;
     int failed;
+    int truncated;
 } kc_embdex_tokens_t;
 
 typedef struct {
@@ -728,7 +729,10 @@ static int kc_embdex_token_add(const char *word, void *userdata)
     size_t size;
     char *copy;
 
-    if (tokens->count >= KC_EMBDEX_QUERY_TOKENS) return 1;
+    if (tokens->count >= KC_EMBDEX_QUERY_TOKENS) {
+        tokens->truncated = 1;
+        return 0;
+    }
     size = strlen(word);
     if (size == SIZE_MAX) {
         tokens->failed = 1;
@@ -1077,9 +1081,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
             status = KC_EMBDEX_ENOMEM;
             goto finished;
         }
-        if (result != KC_BM25_OK &&
-            !(result == KC_BM25_EABORT &&
-            tokens.count == KC_EMBDEX_QUERY_TOKENS))
+        if (result != KC_BM25_OK)
         {
             status = KC_EMBDEX_ELEXICAL;
             goto finished;
@@ -1121,7 +1123,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                         KC_EMBDEX_ENOMEM : KC_EMBDEX_ELEXICAL;
                     goto finished;
                 }
-                if (!fuzzy.ambiguous) {
+                if (!fuzzy.ambiguous && (tokens.count > 1 ||
+                    (fuzzy.best == 1 && fuzzy.count == 1))) {
                     post.fuzzy = 1;
                     for (size_t k = 0; k < fuzzy.count; k++) {
                         result = kc_bm25_postings(index->lexical,
@@ -1181,8 +1184,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                 goto finished;
             }
         }
-        evidence[i].full_phrase = kc_embdex_contains(
-            document.text, joined, strlen(joined));
+        evidence[i].full_phrase = !tokens.truncated &&
+            kc_embdex_contains(document.text, joined, strlen(joined));
         if (evidence[i].full_phrase) {
             evidence[i].exact = tokens.count == 64 ?
                 UINT64_MAX : (UINT64_C(1) << tokens.count) - 1;
@@ -1209,7 +1212,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
 
         for (size_t i = 0; i < index->count; i++)
             exact_full |= evidence[i].full_phrase;
-        if (!exact_full || limit != 1) {
+        if (tokens.truncated || !exact_full || limit != 1) {
             if (kc_emb_embed(query, &embedding, &dimension) != KC_EMB_OK ||
                 dimension != index->dimension)
             {
@@ -1279,7 +1282,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
 
         score = 0.45 * coverage + 0.25 * precise +
             0.15 * phrase + 0.10 * bm25 +
-            0.20 * semantic_score -
+            0.50 * semantic_score -
             0.08 * ((double)corrected / (double)tokens.count);
         if (item->full_phrase) score += 0.5;
         ranks[rank_count].ordinal = i;
