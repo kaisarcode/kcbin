@@ -11,6 +11,30 @@ kcbin is the KaisarCode monorepo for **level-1 (LV1) composable tools**. Each pr
 - Do not reclassify an LV1 composition as a kclib, and do not add any kcbin dependency to kclib.
 - Declare all KaisarCode dependencies explicitly in each project's `manifest.json`; do not silently install them or copy them into the source tree.
 
+## Existing project precedents
+
+Before building, refactoring, or extending a kcbin project, inspect current
+comparable projects in kcbin and the relevant kclibs they compose. Read their
+source, public headers, CLIs, READMEs, tests, and build configurations. The
+repository's actual implementations are the baseline: never invent a command
+convention, API model, file structure, or interface contract from memory.
+
+Reuse proven patterns for APIs, arguments and parameter types, option defaults,
+errors, ownership and lifecycle, help and version output, positional arguments,
+flags, input precedence, stdin and file handling, output formats, diagnostics,
+exit statuses, test cases and PASS/FAIL reporting, cross-platform builds,
+dependency linking, manifests, and documentation. Inspect the exact underlying
+kclib APIs before writing an adapter or composition; project their behavior
+faithfully instead of inventing different semantics or implementing features
+the dependency already provides.
+
+Select precedents by matching responsibility and interface, not by superficial
+file similarity. Follow equivalent concepts consistently and deviate only when
+the project's concrete capability requires it. Keep those differences explicit
+and minimal. Apply current KCS rules where older examples conflict with them.
+Do not copy unrelated mechanisms or introduce extra files and helpers solely
+for organization.
+
 ## Project structure
 
 Each independently distributable project owns its `README.md`, `Makefile`, `manifest.json`, `src/`, tests, and LGPLv3 license files (`LICENSE` with the LGPLv3 text and `COPYING` with the accompanying GPLv3 text, matching kclib project conventions). Use `doc/` only when the project requires more documentation. A project may provide a native CLI, shared library, or both, without an obligatory common API.
@@ -30,6 +54,44 @@ Follow the kclib monorepo conventions:
 - `KCDIST_DIR` may select a shared distribution root; never prune packages belonging to other repositories.
 
 The scripts discover projects by `Makefile`; do not hardcode an inventory. Each project defines its own supported target matrix and link flags.
+
+## Test quality contract
+
+Test quality is a mandatory part of implementing or changing any kcbin project.
+Inspect rigorous, comparable test suites in the current kcbin and kclib projects
+before authoring tests. Match their depth and conventions, scaled to the actual
+capability, complexity, and risks; do not use a fixed test count or pad tests
+with superficial assertions.
+
+Test the shipped public interface and real composition, not only individual
+helpers or successful startup. Check exact output data, document identities,
+ordering, ranking scores where applicable, observable side effects, failure
+propagation, and error codes. A passing exit status or correct result count
+alone does not establish correctness. For numerical behavior, use independently
+determined expected values and explicit tolerances.
+
+Cover applicable happy paths, options and defaults, empty and boundary inputs,
+invalid arguments, malformed input, duplicates, lifecycle and cleanup. Verify
+persistence, corrupt or truncated files, concurrency, and asynchronous behavior
+when the project exposes those capabilities. For CLIs, verify help, stdin/file
+input when supported, output format, exit codes, and invalid commands. For
+compositions, exercise actual dependent kclib contracts, identifier alignment
+and data exchange, missing or incompatible dependency artifacts, and failures
+at component boundaries where relevant. Do not rebuild or vendor kclibs to
+make tests pass.
+
+Keep suites deterministic, isolated, portable, and self-contained, using the
+existing project test layout, normally one `src/test.c` for C projects. Avoid
+new fixture frameworks, extra test files, public network dependencies, and
+untestable demonstrations. Report meaningful named PASS/FAIL cases, accurate
+aggregate totals, and nonzero failure exit codes. Strengthen any test that
+could pass while the contracted behavior is wrong.
+
+Author and update tests in the same implementation increment. Run the
+applicable project-local tests when execution is available, fix confirmed
+failures, and report precisely what was executed. Never claim unexecuted tests
+passed. Detailed platform matrices are proportional to the task, but genuine
+contract coverage is never deferrable polish.
 
 ## Cross-compilation and linking
 
