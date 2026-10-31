@@ -32,6 +32,7 @@ static void embdex_usage(const char *name)
     printf("\n");
     printf("Options:\n");
     printf("  -i, --input <file>      Read associations from file (default: stdin)\n");
+    printf("  -d, --dictionary <file> Add word substitutions (repeatable, build only)\n");
     printf("  -l, --limit <N>         Maximum results (default: 10)\n");
     printf("  -h, --help              Show this help\n");
     printf("  -v, --version           Show version\n");
@@ -207,9 +208,12 @@ static int embdex_parse_records(
  * Create a binary index from a file or standard input.
  * @param path Destination binary index.
  * @param input Optional text input file path.
+ * @param dictionaries Ordered dictionary file paths.
+ * @param dictionary_count Number of dictionaries.
  * @return Process exit status.
  */
-static int embdex_build(const char *path, const char *input)
+static int embdex_build(const char *path, const char *input,
+    const char *const *dictionaries, size_t dictionary_count)
 {
     FILE *file = stdin;
     char *buffer = NULL;
@@ -235,7 +239,8 @@ static int embdex_build(const char *path, const char *input)
         fprintf(stderr, "embdex: invalid tab-separated input\n");
         goto finished;
     }
-    status = kc_embdex_build(path, documents, count);
+    status = kc_embdex_build_with_dictionaries(path, documents, count,
+        dictionaries, dictionary_count);
     if (status != KC_EMBDEX_OK) {
         fprintf(stderr, "embdex: %s\n", kc_embdex_strerror(status));
         goto finished;
@@ -318,19 +323,39 @@ int main(int argc, char **argv)
     }
     if (strcmp(argv[1], "build") == 0) {
         const char *input = NULL;
+        const char **dictionaries = NULL;
+        size_t dictionary_count = 0;
+        int result;
 
-        for (int i = 3; i < argc; i++) {
-            if ((strcmp(argv[i], "-i") == 0 ||
-                strcmp(argv[i], "--input") == 0) &&
-                ++i < argc && input == NULL)
-            {
-                input = argv[i];
-            } else {
-                fprintf(stderr, "embdex: invalid build arguments\n");
+        if (argc > 3) {
+            dictionaries = (const char **)calloc((size_t)(argc - 3),
+                sizeof(*dictionaries));
+            if (dictionaries == NULL) {
+                fprintf(stderr, "embdex: out of memory\n");
                 return 1;
             }
         }
-        return embdex_build(argv[2], input);
+        for (int i = 3; i < argc; i++) {
+            if ((strcmp(argv[i], "-i") == 0 ||
+                strcmp(argv[i], "--input") == 0) &&
+                i + 1 < argc && input == NULL)
+            {
+                input = argv[++i];
+            } else if ((strcmp(argv[i], "-d") == 0 ||
+                strcmp(argv[i], "--dictionary") == 0) &&
+                i + 1 < argc)
+            {
+                dictionaries[dictionary_count++] = argv[++i];
+            } else {
+                fprintf(stderr, "embdex: invalid build arguments\n");
+                free(dictionaries);
+                return 1;
+            }
+        }
+        result = embdex_build(argv[2], input,
+            dictionaries, dictionary_count);
+        free(dictionaries);
+        return result;
     }
     if (strcmp(argv[1], "search") == 0 && argc >= 4) {
         size_t limit = 10;
