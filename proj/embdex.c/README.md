@@ -86,11 +86,14 @@ Query coverage, phrase completeness, spelling uncertainty, BM25 rank and
 semantic similarity influence the final ranking. Matches without sufficient
 evidence are rejected rather than returning the nearest neighbor unconditionally.
 
-Dictionary-free searches calculate one embedding when needed. Maps with
-ambiguous translations can evaluate a bounded set of distinct word
-combinations. When one complete phrase match satisfies a single-result
-request, inference can be skipped. Indexes with up to 256 associations use exact cosine
-similarity and do not build HNSW; larger indexes use HNSW.
+Search evaluates literal terms and n-grams first. A complete query
+covered by a phrase or a contiguous combination of indexed associations
+returns ranked lexical candidates without generating query embeddings.
+Partial coverage triggers semantic fallback. Dictionary substitutions
+also provide normalized literal matches, and ambiguous substitutions
+can generate a bounded set of embeddings when needed. Indexes with up
+to 256 associations use exact cosine similarity and skip HNSW; larger
+indexes construct HNSW when opened.
 
 The lexical analyzer folds accents, and spelling correction considers only
 words in the dataset's own vocabulary. Its edit-distance limits and the
