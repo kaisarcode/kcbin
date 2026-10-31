@@ -35,6 +35,52 @@ and minimal. Apply current KCS rules where older examples conflict with them.
 Do not copy unrelated mechanisms or introduce extra files and helpers solely
 for organization.
 
+## Mandatory KCS and interface consistency
+
+KCS and established KaisarCode conventions are mandatory for **all**
+implementation artifacts, not merely for tests. Read the current authoritative
+KCS rules and the relevant current examples in kcbin and kclib before
+writing or changing code. Apply the required details while authoring, not
+as deferred formatting or a post-implementation cleanup. Normative KCS rules
+take priority over historical code that does not conform.
+
+Inspect separate closest precedents as necessary for each concept, and
+reproduce their actual conventions:
+
+* **Tests and output:** use the established named case presentation
+  `[current/total] [PASS|FAIL] case_name: description` and the
+  `N passed, M failed` summary where that is the applicable C-project
+  convention. Verify correct accounting, exit codes, real outputs, and
+  contract coverage proportionate to complexity. Do not improvise a new
+  runner or output style.
+* **CLI/help:** follow actual kclib/kcbin help formatting, usage lines,
+  spacing, option names, parameter types, defaults, command syntax,
+  stdin/file behavior, output formats, error messages, and exit codes.
+  Preserve the contract of each composed kclib instead of redefining it.
+* **Public APIs:** mirror established names, data types, argument
+  conventions, option structures, return values, error handling,
+  lifecycle, ownership, and JS/Lua projections where concepts match.
+* **Source conventions:** use standard KaisarCode headers, required
+  meaningful DocBlocks and parameter/return metadata, naming, indentation,
+  whitespace, and KCS comment rules. No invented internal explanatory
+  comments in place of required DocBlocks; non-DocBlock comments are
+  prohibited wherever the KCS rules prohibit them.
+* **Files and complexity:** follow standard file naming, including **no
+  underscores in filenames**. Keep the number of files proportional to
+  project responsibility and to comparable projects; use one `src/test.c`
+  for ordinary C projects, and do not create extra helper, tokenizer,
+  fixture, or private header files solely for code organization.
+* **Documentation/build/distribution:** match comparable README, `doc/`
+  structure, page naming and navigation, Markdown, manifests, licensing,
+  cross-compilation, output layout, and dependency contracts. Do not
+  invent alternative conventions where an existing one applies.
+
+A matching concept must use the existing convention. Deviate only for a
+concrete technical difference, and never because a different shape would
+be easier to write. Review the changed artifacts for these requirements
+before committing; do not claim compliance from memory or from a passing
+test suite alone.
+
 ## Project structure
 
 Each independently distributable project owns its `README.md`, `Makefile`, `manifest.json`, `src/`, tests, and LGPLv3 license files (`LICENSE` with the LGPLv3 text and `COPYING` with the accompanying GPLv3 text, matching kclib project conventions). Use `doc/` only when the project requires more documentation. A project may provide a native CLI, shared library, or both, without an obligatory common API.
@@ -83,8 +129,8 @@ make tests pass.
 Keep suites deterministic, isolated, portable, and self-contained, using the
 existing project test layout, normally one `src/test.c` for C projects. Avoid
 new fixture frameworks, extra test files, public network dependencies, and
-untestable demonstrations. Report meaningful named PASS/FAIL cases, accurate
-aggregate totals, and nonzero failure exit codes. Strengthen any test that
+untestable demonstrations. Report cases in the established indexed PASS/FAIL format described above,
+accurate aggregate totals, and nonzero failure exit codes. Strengthen any test that
 could pass while the contracted behavior is wrong.
 
 Author and update tests in the same implementation increment. Run the
