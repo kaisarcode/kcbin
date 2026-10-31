@@ -463,6 +463,26 @@ static int kc_embdex_is_word_byte(unsigned char value)
 }
 
 /**
+ * Recognize common UTF-8 punctuation which must not be absorbed into a
+ * translated word, including inverted Spanish question/exclamation marks.
+ * @param text Remaining UTF-8 bytes.
+ * @param length Remaining byte count.
+ * @return Punctuation sequence width, otherwise zero.
+ */
+static size_t kc_embdex_punctuation_width(const char *text, size_t length)
+{
+    const unsigned char *p = (const unsigned char *)text;
+
+    if (length >= 2 && p[0] == 0xc2 &&
+        (p[1] == 0xa1 || p[1] == 0xbf))
+        return 2;
+    if (length >= 3 && p[0] == 0xe2 && p[1] == 0x80 &&
+        p[2] >= 0x90 && p[2] <= 0xa6)
+        return 3;
+    return 0;
+}
+
+/**
  * Append a byte sequence into an expanding, NUL-terminated text buffer.
  * @param buffer Destination allocation.
  * @param used Current content length.
@@ -524,12 +544,17 @@ static int kc_embdex_embed_text(const kc_embdex_t *index,
         size_t length;
         char *normalized = NULL;
 
-        if (!kc_embdex_is_word_byte((unsigned char)text[offset])) {
-            end++;
+        size_t punctuation = kc_embdex_punctuation_width(
+            text + offset, size - offset);
+
+        if (punctuation != 0 ||
+            !kc_embdex_is_word_byte((unsigned char)text[offset])) {
+            end += punctuation == 0 ? 1 : punctuation;
         } else {
             size_t first, alternatives;
 
             while (end < size &&
+                kc_embdex_punctuation_width(text + end, size - end) == 0 &&
                 kc_embdex_is_word_byte((unsigned char)text[end]))
                 end++;
             status = kc_embdex_word_normalize(index,
