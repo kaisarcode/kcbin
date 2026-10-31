@@ -149,20 +149,21 @@ HNSW graph; larger indexes construct HNSW at open time.
 
 ## Experimental literal word substitutions
 
-To measure whether the existing English embedding model can retrieve
-Spanish queries more reliably, `KC_EMBDEX_WORDMAP` optionally specifies a
-tab-separated UTF-8 file of one **Spanish word** and one **English word**
-per line. Repeating a source word declares alternative translations in
-file order. The source text is not translated grammatically: individual
-words are replaced in place; unknown words and punctuation are retained.
-This transformation only changes the text passed to `libemb`.
-Original strings and all lexical retrieval stay unchanged.
+To build a domain-specific or language-specific map, provide a dataset
+and optionally set `KC_EMBDEX_WORDMAP` to a tab-separated UTF-8 dictionary
+of one **source word** and one **English word** per line. Repeated source
+words declare alternative translations in file order.
+
+Build-time normalization is strictly word-for-word. Unknown words and
+punctuation remain unchanged; no grammatical translation is performed.
+The original associations are preserved. Embeddings use the first
+available translation for each word. Two independent BM25 structures
+index the original and dictionary-normalized text. Search compares
+query terms with both, alongside semantic embeddings and phrase evidence.
 
 ```sh
 KC_EMBDEX_WORDMAP=wordmap-es-en.tsv embdex build corpus.bin -i corpus.tsv
-KC_EMBDEX_WORDMAP=wordmap-es-en.tsv \
-    KC_EMBDEX_WORDMAP_VARIANTS=8 \
-    embdex search corpus.bin "qué bondi va al centro" --limit 5
+embdex search corpus.bin "qué bondi va al centro" --limit 5
 ```
 
 The corpus embeddings use the **first** English translation for each word.
@@ -200,19 +201,25 @@ execution. No grammatical correction or translation-ranking model is
 introduced.
 
 The `KC_EMBDEX_WORDMAP_VARIANTS` budget defaults to 8 when ambiguous words
-are present (1 disables alternative combinations). Indexes with no
-wordmap continue to use the original embedding path. The full wordmap
-bytes are included in the index model identity, so a mapped index must be
-opened with the same file and rebuilt when the map changes.
+are present (1 disables alternative combinations). The dictionary is only
+a **build input**: in version 2 the binary index embeds both lexical sections
+and its normalized dictionary. `kc_embdex_open()` does not need the
+dictionary TSV or its environment variable. Multiple indexes built with
+different dictionaries can coexist; the consuming application chooses the
+appropriate binary map. A changed dictionary requires rebuilding that map.
+
+Dictionary-free indexes retain version 1 and the original search path.
+The previous experimental version 1 indexes created with an external
+wordmap still depend on that original environment configuration.
 
 `KC_EMBDEX_WORDMAP_TRACE` can write optional JSONL records containing
 the original text, substituted text and combination number.
 Like `KC_EMBDEX_TRACE`, it is diagnostic and includes user content.
 
-These environment variables are isolated experimental controls rather
-than new public search modes or a standardized dictionary interface.
-They are intended to be removed or redesigned after the bilingual
-benchmark establishes whether literal substitutions actually help.
+The dictionary input and translation-variant controls remain
+experimental build/search mechanisms, not a standardized cross-project
+dictionary format or public search modes. The persistent index is already
+independent of those build inputs for normal use.
 
 ## CLI
 
