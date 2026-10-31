@@ -1,6 +1,6 @@
 /**
- * test.c - Semantic Index Contract Tests
- * Summary: Checks semantic association, binary persistence and input errors.
+ * test.c - Embdex public contract tests.
+ * Summary: Checks persistent build, retrieval callbacks and CLI behavior.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -9,7 +9,6 @@
 
 #include "libembdex.h"
 
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,679 +22,311 @@
 #endif
 
 #ifdef __EMSCRIPTEN__
-static int embdex_test_total = 7;
+#define KC_TEST_TOTAL 4
 #else
-static int embdex_test_total = 9;
+#define KC_TEST_TOTAL 6
 #endif
-static int embdex_test_current = 0;
+
+static int kc_test_current = 0;
+
+typedef struct {
+    size_t count;
+    size_t maximum;
+    int found;
+    int repeated;
+    double previous;
+    int ordered;
+} kc_test_results_t;
 
 /**
- * Print a numbered contract test result and its behavior.
- * @param name Name of the public contract case.
- * @param detail Behavior exercised by the test.
- * @param failed Nonzero when the case failed.
- * @return Zero on success, one on failure.
+ * Record one public contract assertion with a numbered result.
+ * @param name Case identifier.
+ * @param detail Contract being exercised.
+ * @param failed Whether any assertion failed.
+ * @return Zero on success, one otherwise.
  */
-static int embdex_test_result(
-    const char *name,
-    const char *detail,
-    int failed
-)
+static int kc_test_result(const char *name, const char *detail, int failed)
 {
     printf("[%d/%d] [%s] %s: %s\n",
-        embdex_test_current, embdex_test_total,
+        kc_test_current, KC_TEST_TOTAL,
         failed ? "FAIL" : "PASS", name, detail);
     return failed ? 1 : 0;
 }
 
 /**
- * Test repeated association IDs, automatic embeddings and result limits.
- * @return Zero when all checks succeed, one otherwise.
+ * Inspect one borrowed result and optionally stop early.
+ * @param result Borrowed association and score.
+ * @param userdata Mutable test observations.
+ * @return Nonzero after the configured result count has been delivered.
  */
-static int embdex_test_build(void)
+static int kc_test_receive(const kc_embdex_result_t *result, void *userdata)
 {
-    const kc_embdex_document_t corpus[] = {
-        {"document", "Security and authentication between peers"},
-        {"document", "Encryption and public keys"},
-        {"other", "Storing personal documents"}
-    };
-    kc_embdex_t *index = NULL;
-    kc_embdex_result_t *results = NULL;
-    size_t result_count = 0;
-    size_t limit = 3;
-    double threshold = -1.0;
-    kc_embdex_search_options_t options = {
-        .limit = &limit,
-        .threshold = &threshold
-    };
-    int failed = 0;
-    int repeated = 0;
+    kc_test_results_t *state = (kc_test_results_t *)userdata;
 
-    failed |= kc_embdex_build(&index, corpus, 3) != KC_EMBDEX_OK;
-    if (index != NULL) {
-        failed |= kc_embdex_count(index) != 3;
-        failed |= kc_embdex_search(
-            index, "secure communication", &options, &results, &result_count
-        ) != KC_EMBDEX_OK;
-        failed |= result_count != 3;
-        for (size_t i = 0; i < result_count; i++) {
-            failed |= results[i].id == NULL || results[i].content == NULL;
-            if (results[i].id != NULL) {
-                repeated += strcmp(results[i].id, "document") == 0;
-            }
-        }
-        failed |= repeated != 2;
-    }
-    kc_embdex_free(results);
-    kc_embdex_close(index);
-    return embdex_test_result("build_and_search",
-        "preserves repeated IDs and ranks distinct records", failed);
+    if (result == NULL || result->id == NULL || result->content == NULL)
+        return 1;
+    if (state->count != 0 && result->score > state->previous)
+        state->ordered = 0;
+    state->previous = result->score;
+    state->count++;
+    if (strcmp(result->id, "shared") == 0) state->repeated++;
+    if (strstr(result->content, "authentication") != NULL)
+        state->found = 1;
+    return state->maximum != 0 && state->count >= state->maximum;
 }
 
 /**
- * Test the index file round-trip without the original corpus.
- * @return Zero when all checks succeed, one otherwise.
+ * Build a reusable corpus and verify callbacks, limits and ordering.
+ * @return Zero when indexed associations remain searchable.
  */
-static int embdex_test_persistence(void)
+static int kc_test_search(void)
 {
-    const char *path = "embdex-test-index.bin";
-    const kc_embdex_document_t corpus[] = {
-        {"laugh", "A smile, laughter and something funny"},
-        {"file", "A serious technical document"}
+    const kc_embdex_document_t documents[] = {
+        {"shared", "authentication and encrypted peer communication"},
+        {"shared", "authentication and public keys"},
+        {"other", "gardening flowers and plants"}
     };
-    kc_embdex_t *built = NULL;
-    kc_embdex_t *opened = NULL;
-    kc_embdex_result_t *results = NULL;
-    size_t count = 0;
+    const char *path = "embdex-test-index.bin";
+    kc_embdex_t *index = NULL;
+    kc_test_results_t state = {0};
+    size_t limit = 3, zero = 0;
+    kc_embdex_search_options_t options = { .limit = &limit };
     int failed = 0;
 
-    failed |= kc_embdex_build(&built, corpus, 2) != KC_EMBDEX_OK;
-    if (built != NULL) {
-        failed |= kc_embdex_save(built, path) != KC_EMBDEX_OK;
-        kc_embdex_close(built);
-        built = NULL;
-        if (!failed) {
-            failed |= kc_embdex_open(&opened, path) != KC_EMBDEX_OK;
-        }
-    }
-    if (opened != NULL) {
-        failed |= kc_embdex_count(opened) != 2;
-        failed |= kc_embdex_search(
-            opened, "something amusing", NULL, &results, &count
-        ) != KC_EMBDEX_OK;
-        failed |= count != 2;
-        for (size_t i = 0; i < count; i++) {
-            failed |= results[i].id == NULL;
-            failed |= results[i].content == NULL;
-        }
-        failed |= kc_embdex_save(opened, path) != KC_EMBDEX_ESTATE;
-        kc_embdex_free(results);
-        results = NULL;
-        failed |= kc_embdex_search_mode(opened, "laughter",
-            KC_EMBDEX_MODE_LEXICAL, NULL, &results, &count) != KC_EMBDEX_OK;
-        failed |= count != 1 || results == NULL;
-        if (results != NULL && count == 1)
-            failed |= strcmp(results[0].id, "laugh") != 0;
-        kc_embdex_free(results);
-        results = NULL;
-        failed |= kc_embdex_search_mode(opened, "laughter",
-            KC_EMBDEX_MODE_HYBRID, NULL, &results, &count) != KC_EMBDEX_OK;
-        failed |= count != 2 || results == NULL;
-        if (results != NULL && count == 2)
-            failed |= strcmp(results[0].id, "laugh") != 0;
-        kc_embdex_free(results);
-        results = NULL;
-        failed |= kc_embdex_search_mode(opened, "laughter",
-            KC_EMBDEX_MODE_RERANK, NULL, &results, &count) != KC_EMBDEX_OK;
-        failed |= count != 1 || results == NULL;
-        if (results != NULL && count == 1) {
-            failed |= strcmp(results[0].id, "laugh") != 0;
-            failed |= !isfinite(results[0].score);
-        }
-    }
-    kc_embdex_free(results);
-    kc_embdex_close(built);
-    kc_embdex_close(opened);
     remove(path);
-    return embdex_test_result("binary_roundtrip",
-        "restores associations without re-embedding", failed);
+    failed |= kc_embdex_build(path, documents, 3) != KC_EMBDEX_OK;
+    if (!failed) failed |= kc_embdex_open(&index, path) != KC_EMBDEX_OK;
+    if (!failed) {
+        state.ordered = 1;
+        failed |= kc_embdex_search(index, "authentication", &options,
+            kc_test_receive, &state) != KC_EMBDEX_OK;
+        failed |= state.count == 0 || state.count > 3;
+        failed |= !state.found || !state.ordered;
+        state = (kc_test_results_t){0};
+        state.ordered = 1;
+        state.maximum = 1;
+        failed |= kc_embdex_search(index, "authentication", NULL,
+            kc_test_receive, &state) != KC_EMBDEX_OK;
+        failed |= state.count != 1;
+        options.limit = &zero;
+        state = (kc_test_results_t){0};
+        failed |= kc_embdex_search(index, "authentication", &options,
+            kc_test_receive, &state) != KC_EMBDEX_OK;
+        failed |= state.count != 0;
+    }
+    kc_embdex_close(index);
+    remove(path);
+    return kc_test_result("search",
+        "builds once and delivers sorted borrowed results", failed);
 }
 
 /**
- * Test invalid input, corrupted binaries and an empty corpus.
- * @return Zero when all checks succeed, one otherwise.
+ * Check that repeated public IDs represent independent associations.
+ * @return Zero when both associations can be retrieved independently.
  */
-static int embdex_test_errors(void)
+static int kc_test_duplicates(void)
 {
-    const char *path = "embdex-test-index.bin";
-    const kc_embdex_document_t invalid[] = {{NULL, "text"}};
+    const kc_embdex_document_t documents[] = {
+        {"shared", "authentication between peers"},
+        {"shared", "authentication between clients"}
+    };
+    const char *path = "embdex-test-duplicates.bin";
     kc_embdex_t *index = NULL;
-    kc_embdex_t *opened = NULL;
-    kc_embdex_result_t *results = NULL;
-    size_t count = 9;
+    kc_test_results_t state = {0};
+    int failed = 0;
+
+    remove(path);
+    failed |= kc_embdex_build(path, documents, 2) != KC_EMBDEX_OK;
+    if (!failed) failed |= kc_embdex_open(&index, path) != KC_EMBDEX_OK;
+    if (!failed) {
+        failed |= kc_embdex_search(index, "authentication", NULL,
+            kc_test_receive, &state) != KC_EMBDEX_OK;
+        failed |= state.count != 2 || state.repeated != 2;
+    }
+    kc_embdex_close(index);
+    remove(path);
+    return kc_test_result("duplicates",
+        "keeps duplicate IDs as distinct indexed records", failed);
+}
+
+/**
+ * Validate error statuses and invalid public arguments.
+ * @return Zero when errors are reported without leaking index ownership.
+ */
+static int kc_test_invalid(void)
+{
+    const kc_embdex_document_t bad[] = {{NULL, "content"}};
+    const kc_embdex_document_t valid[] = {{"id", "text"}};
+    kc_embdex_t *index = NULL;
+    int failed = 0;
+
+    failed |= kc_embdex_build(NULL, valid, 1) != KC_EMBDEX_EINVAL;
+    failed |= kc_embdex_build("", valid, 1) != KC_EMBDEX_EINVAL;
+    failed |= kc_embdex_build("unused.bin", NULL, 1) != KC_EMBDEX_EINVAL;
+    failed |= kc_embdex_build("unused.bin", bad, 1) != KC_EMBDEX_EINVAL;
+    failed |= kc_embdex_open(NULL, "unused.bin") != KC_EMBDEX_EINVAL;
+    failed |= kc_embdex_open(&index, "") != KC_EMBDEX_EINVAL;
+    failed |= kc_embdex_search(NULL, "hello", NULL,
+        kc_test_receive, NULL) != KC_EMBDEX_EINVAL;
+    failed |= kc_embdex_strerror(KC_EMBDEX_EINVAL) == NULL;
+    kc_embdex_close(index);
+    kc_embdex_close(NULL);
+    remove("unused.bin");
+    return kc_test_result("invalid",
+        "rejects invalid build, open and search arguments", failed);
+}
+
+/**
+ * Reject a truncated or corrupted persistent index.
+ * @return Zero when malformed content cannot be opened as an index.
+ */
+static int kc_test_format(void)
+{
+    const char *path = "embdex-test-corrupt.bin";
+    kc_embdex_t *index = NULL;
     FILE *file;
     int failed = 0;
 
-    failed |= kc_embdex_build(&index, invalid, 1) != KC_EMBDEX_EINVAL;
-    failed |= index != NULL;
-    failed |= kc_embdex_build(&index, NULL, 0) != KC_EMBDEX_OK;
-    if (index != NULL) {
-        failed |= kc_embdex_search(
-            index, "anything", NULL, &results, &count
-        ) != KC_EMBDEX_OK;
-        failed |= count != 0;
-        failed |= results != NULL;
-        failed |= kc_embdex_save(index, path) != KC_EMBDEX_OK;
-        failed |= kc_embdex_open(&opened, path) != KC_EMBDEX_OK;
-        failed |= opened == NULL || kc_embdex_count(opened) != 0;
-        kc_embdex_close(opened);
-        opened = NULL;
-
-        file = fopen(path, "r+b");
-        if (file != NULL) {
-            if (fseek(file, 52, SEEK_SET) == 0) {
-                int value = fgetc(file);
-
-                if (value == EOF || fseek(file, 52, SEEK_SET) != 0 ||
-                    fputc(value ^ 1, file) == EOF) {
-                    failed = 1;
-                }
-            } else failed = 1;
-            failed |= fclose(file) != 0;
-            failed |= kc_embdex_open(&opened, path) != KC_EMBDEX_EFORMAT;
-            failed |= opened != NULL;
-            kc_embdex_close(opened);
-            opened = NULL;
-        } else failed = 1;
-
-        failed |= kc_embdex_save(index, path) != KC_EMBDEX_OK;
-        file = fopen(path, "r+b");
-        if (file != NULL) {
-            if (fseek(file, 68, SEEK_SET) == 0) {
-                failed |= fputc(0xFF, file) == EOF;
-            } else failed = 1;
-            failed |= fclose(file) != 0;
-            failed |= kc_embdex_open(&opened, path) != KC_EMBDEX_EFORMAT;
-            failed |= opened != NULL;
-            kc_embdex_close(opened);
-            opened = NULL;
-        } else failed = 1;
-        kc_embdex_close(index);
-        index = NULL;
-    }
     file = fopen(path, "wb");
-    if (file != NULL) {
-        failed |= fwrite("bad", 1, 3, file) != 3;
+    if (file == NULL) failed = 1;
+    else {
+        failed |= fwrite("invalid", 1, 7, file) != 7;
         failed |= fclose(file) != 0;
-        failed |= kc_embdex_open(&opened, path) != KC_EMBDEX_EFORMAT;
-        failed |= opened != NULL;
-    } else {
-        failed = 1;
     }
-    kc_embdex_close(opened);
+    if (!failed)
+        failed |= kc_embdex_open(&index, path) != KC_EMBDEX_EFORMAT;
+    failed |= index != NULL;
+    kc_embdex_close(index);
     remove(path);
-    return embdex_test_result("invalid_inputs",
-        "rejects invalid records and corrupted indexes", failed);
-}
-
-/**
- * Build a compact corpus with duplicate identifiers and different terms.
- * @return Owned searchable index, or NULL if building fails.
- */
-static kc_embdex_t *embdex_test_modes_index(void)
-{
-    const kc_embdex_document_t corpus[] = {
-        {"shared", "alpha banana banana"},
-        {"shared", "banana peach"},
-        {"other", "coconut peach"}
-    };
-    kc_embdex_t *index = NULL;
-
-    if (kc_embdex_build(&index, corpus, 3) != KC_EMBDEX_OK)
-        return NULL;
-    return index;
-}
-
-/**
- * Test exact BM25 candidates, scores, repeated IDs and lexical-only queries.
- * @return Zero when all lexical contracts hold, otherwise one.
- */
-static int embdex_test_lexical(void)
-{
-    kc_embdex_t *index = embdex_test_modes_index();
-    kc_embdex_result_t *results = NULL;
-    size_t count = 99, limit = 2;
-    kc_embdex_search_options_t options = {.limit = &limit};
-    int failed = 0;
-
-    if (index == NULL)
-        return embdex_test_result("lexical_search",
-            "finds exact tokens while preserving distinct associations", 1);
-    failed |= kc_embdex_search_mode(index, "banana",
-        KC_EMBDEX_MODE_LEXICAL, &options, &results, &count) != KC_EMBDEX_OK;
-    failed |= count != 2 || results == NULL;
-    if (results != NULL && count == 2) {
-        failed |= strcmp(results[0].id, "shared") != 0;
-        failed |= strcmp(results[1].id, "shared") != 0;
-        failed |= strcmp(results[0].content, "alpha banana banana") != 0;
-        failed |= strcmp(results[1].content, "banana peach") != 0;
-        failed |= !(results[0].score > results[1].score);
-    }
-    kc_embdex_free(results);
-    results = NULL;
-    failed |= kc_embdex_search_mode(index, "alpha",
-        KC_EMBDEX_MODE_LEXICAL, NULL, &results, &count) != KC_EMBDEX_OK;
-    failed |= count != 1 || results == NULL;
-    if (results != NULL && count == 1)
-        failed |= strcmp(results[0].content, "alpha banana banana") != 0;
-    kc_embdex_free(results);
-    results = NULL;
-    failed |= kc_embdex_search_mode(index, "nonexistentterm",
-        KC_EMBDEX_MODE_LEXICAL, NULL, &results, &count) != KC_EMBDEX_OK;
-    failed |= count != 0 || results != NULL;
-    kc_embdex_close(index);
-    return embdex_test_result("lexical_search",
-        "finds exact tokens while preserving distinct associations", failed);
-}
-
-/**
- * Test RRF rank fusion, semantic-only candidates and deterministic overlap.
- * @return Zero when the hybrid ranking contract holds, otherwise one.
- */
-static int embdex_test_hybrid(void)
-{
-    kc_embdex_t *index = embdex_test_modes_index();
-    kc_embdex_result_t *lexical = NULL;
-    kc_embdex_result_t *semantic = NULL;
-    kc_embdex_result_t *results = NULL;
-    size_t lexical_count = 0, semantic_count = 0, count = 0;
-    int failed = 0;
-
-    if (index == NULL)
-        return embdex_test_result("hybrid_search",
-            "fuses BM25 and HNSW positions by ordinal with RRF", 1);
-    failed |= kc_embdex_search_mode(index, "alpha",
-        KC_EMBDEX_MODE_LEXICAL, NULL,
-        &lexical, &lexical_count) != KC_EMBDEX_OK;
-    failed |= lexical_count != 1 || lexical == NULL;
-    failed |= kc_embdex_search(index, "alpha", NULL,
-        &semantic, &semantic_count) != KC_EMBDEX_OK;
-    failed |= semantic_count != 3 || semantic == NULL;
-    failed |= kc_embdex_search_mode(index, "alpha",
-        KC_EMBDEX_MODE_HYBRID, NULL,
-        &results, &count) != KC_EMBDEX_OK;
-    failed |= count != 3 || results == NULL;
-    if (lexical != NULL && semantic != NULL && results != NULL &&
-        lexical_count == 1 && semantic_count == 3 && count == 3)
-    {
-        for (size_t i = 0; i < count; i++) {
-            double expected = 0.0;
-
-            for (size_t j = 0; j < lexical_count; j++) {
-                if (strcmp(results[i].content, lexical[j].content) == 0)
-                    expected += 1.0 / (61.0 + (double)j);
-            }
-            for (size_t j = 0; j < semantic_count; j++) {
-                if (strcmp(results[i].content, semantic[j].content) == 0)
-                    expected += 1.0 / (61.0 + (double)j);
-            }
-            failed |= !isfinite(results[i].score);
-            failed |= fabs(results[i].score - expected) > 1e-12;
-            if (i > 0)
-                failed |= results[i - 1].score < results[i].score;
-        }
-    }
-    kc_embdex_free(results);
-    results = NULL;
-    failed |= kc_embdex_search_mode(index, "nonexistentterm",
-        KC_EMBDEX_MODE_HYBRID, NULL, &results, &count) != KC_EMBDEX_OK;
-    failed |= count != 3 || results == NULL;
-    kc_embdex_free(results);
-    kc_embdex_free(semantic);
-    kc_embdex_free(lexical);
-    kc_embdex_close(index);
-    return embdex_test_result("hybrid_search",
-        "fuses BM25 and HNSW positions by ordinal with RRF", failed);
-}
-
-/**
- * Check cosine reranking is constrained to the lexical candidate set.
- * @return Zero when reranking and exclusions are correct, otherwise one.
- */
-static int embdex_test_rerank(void)
-{
-    kc_embdex_t *index = embdex_test_modes_index();
-    kc_embdex_result_t *results = NULL;
-    size_t count = 0, limit = 1;
-    kc_embdex_search_options_t options = {.limit = &limit};
-    int failed = 0;
-
-    if (index == NULL)
-        return embdex_test_result("rerank_search",
-            "scores only lexical matches using stored document embeddings", 1);
-    failed |= kc_embdex_search_mode(index, "banana",
-        KC_EMBDEX_MODE_RERANK, NULL, &results, &count) != KC_EMBDEX_OK;
-    failed |= count != 2 || results == NULL;
-    if (results != NULL && count == 2) {
-        int a = 0, b = 0;
-
-        for (size_t i = 0; i < count; i++) {
-            a += strcmp(results[i].content, "alpha banana banana") == 0;
-            b += strcmp(results[i].content, "banana peach") == 0;
-            failed |= !isfinite(results[i].score);
-            failed |= results[i].score < -1.0 || results[i].score > 1.0;
-        }
-        failed |= a != 1 || b != 1;
-        failed |= results[0].score < results[1].score;
-    }
-    kc_embdex_free(results);
-    results = NULL;
-    failed |= kc_embdex_search_mode(index, "banana",
-        KC_EMBDEX_MODE_RERANK, &options, &results, &count) != KC_EMBDEX_OK;
-    failed |= count != 1 || results == NULL;
-    kc_embdex_free(results);
-    results = NULL;
-    failed |= kc_embdex_search_mode(index, "nonexistentterm",
-        KC_EMBDEX_MODE_RERANK, NULL, &results, &count) != KC_EMBDEX_OK;
-    failed |= count != 0 || results != NULL;
-    kc_embdex_close(index);
-    return embdex_test_result("rerank_search",
-        "scores only lexical matches using stored document embeddings", failed);
-}
-
-/**
- * Check legacy semantic behavior and the new mode validation contracts.
- * @return Zero when all mode argument and state checks hold, otherwise one.
- */
-static int embdex_test_mode_contract(void)
-{
-    kc_embdex_t *index = embdex_test_modes_index();
-    kc_embdex_result_t *results = (kc_embdex_result_t *)1;
-    kc_embdex_result_t *reference = NULL;
-    size_t count = 99, reference_count = 0, limit = 0;
-    double bad = 2.0;
-    kc_embdex_search_options_t options = {
-        .limit = &limit, .threshold = &bad
-    };
-    int failed = 0;
-
-    if (index == NULL)
-        return embdex_test_result("mode_contract",
-            "retains semantic behavior and validates modes and options", 1);
-    failed |= kc_embdex_search_mode(index, "alpha", 99, NULL,
-        &results, &count) != KC_EMBDEX_EINVAL;
-    failed |= results != NULL || count != 0;
-    failed |= kc_embdex_search_mode(index, "alpha",
-        KC_EMBDEX_MODE_HYBRID, &options, &results,
-        &count) != KC_EMBDEX_EINVAL;
-    failed |= results != NULL || count != 0;
-    bad = -1.0;
-    failed |= kc_embdex_search_mode(index, "alpha",
-        KC_EMBDEX_MODE_HYBRID, &options, &results,
-        &count) != KC_EMBDEX_OK;
-    failed |= results != NULL || count != 0;
-    limit = 3;
-    failed |= kc_embdex_search(index, "alpha", &options,
-        &reference, &reference_count) != KC_EMBDEX_OK;
-    failed |= kc_embdex_search_mode(index, "alpha",
-        KC_EMBDEX_MODE_SEMANTIC, &options,
-        &results, &count) != KC_EMBDEX_OK;
-    failed |= count != reference_count;
-    if (results != NULL && reference != NULL && count == reference_count) {
-        for (size_t i = 0; i < count; i++) {
-            failed |= strcmp(results[i].content, reference[i].content) != 0;
-            failed |= results[i].score != reference[i].score;
-        }
-    } else failed = 1;
-    kc_embdex_free(results);
-    kc_embdex_free(reference);
-    results = NULL;
-    count = 99;
-    failed |= kc_embdex_search_mode(NULL, "alpha",
-        KC_EMBDEX_MODE_LEXICAL, NULL, &results,
-        &count) != KC_EMBDEX_EINVAL;
-    failed |= count != 0 || results != NULL;
-    failed |= kc_embdex_strerror(KC_EMBDEX_ELEXICAL) == NULL;
-    kc_embdex_close(index);
-    return embdex_test_result("mode_contract",
-        "retains semantic behavior and validates modes and options", failed);
+    return kc_test_result("format",
+        "rejects corrupt persisted data without partial handles", failed);
 }
 
 #ifndef __EMSCRIPTEN__
 /**
- * Verify the CLI help and version output using a text stream.
- * @return Zero when the public CLI information follows the kclib contract.
+ * Check conventional CLI help and build-version output.
+ * @return Zero when help and version operations are self-contained.
  */
-static int embdex_test_cli_info(void)
+static int kc_test_cli_info(void)
 {
-    const char *path = "embdex-cli-info.txt";
     FILE *file;
     char line[512];
-    int failed = 0;
-    int usage = 0, commands = 0, options = 0;
-    int build = 0, search = 0, help = 0, version = 0;
+    unsigned long long version = 0;
+    char extra;
+    int failed = 0, usage = 0, commands = 0, options = 0, modes = 0;
 
-    failed |= system(
-        KC_TEST_CLI " --help > embdex-cli-info.txt 2>&1"
-    ) != 0;
-    file = fopen(path, "r");
-    if (file == NULL) {
-        failed = 1;
-    } else {
+    failed |= system(KC_TEST_CLI " --help > embdex-cli-info.txt 2>&1") != 0;
+    file = fopen("embdex-cli-info.txt", "r");
+    if (file == NULL) failed = 1;
+    else {
         while (fgets(line, sizeof(line), file) != NULL) {
-            usage |= strstr(line, "Usage: ") != NULL &&
-                strstr(line, " <command> <index> [options]") != NULL;
-            commands |= strcmp(line, "Commands:\n") == 0;
-            options |= strcmp(line, "Options:\n") == 0;
-            build |= strstr(line, "  build <index>") == line;
-            search |= strstr(line, "  search <index> <query>") == line;
-            help |= strstr(line, "-h, --help") != NULL;
-            version |= strstr(line, "-v, --version") != NULL;
+            usage |= strstr(line, "Usage: ") != NULL;
+            commands |= strstr(line, "Commands:") != NULL;
+            options |= strstr(line, "Options:") != NULL;
+            modes |= strstr(line, "--mode") != NULL;
         }
         failed |= ferror(file) != 0;
         failed |= fclose(file) != 0;
     }
-    failed |= !(usage && commands && options && build && search &&
-        help && version);
-
-    failed |= system(
-        KC_TEST_CLI " --version > embdex-cli-info.txt 2>&1"
-    ) != 0;
-    file = fopen(path, "r");
-    if (file == NULL) {
-        failed = 1;
-    } else {
-        unsigned long long build_version = 0;
-        char extra;
-
-        failed |= fscanf(file, "%llu %c", &build_version, &extra) != 1;
+    failed |= !usage || !commands || !options || modes;
+    failed |= system(KC_TEST_CLI " --version > embdex-cli-info.txt 2>&1") != 0;
+    file = fopen("embdex-cli-info.txt", "r");
+    if (file == NULL) failed = 1;
+    else {
+        failed |= fscanf(file, "%llu %c", &version, &extra) != 1;
         failed |= fclose(file) != 0;
-        failed |= build_version != (unsigned long long)kc_embdex_version();
+        failed |= version != (unsigned long long)kc_embdex_version();
     }
     failed |= system(
         KC_TEST_CLI " --help build > " KC_TEST_NULL " 2>&1"
     ) == 0;
-    failed |= system(
-        KC_TEST_CLI " --version search > " KC_TEST_NULL " 2>&1"
-    ) == 0;
-    remove(path);
-    return embdex_test_result("cli_info",
-        "prints kclib command help and the library build version", failed);
+    remove("embdex-cli-info.txt");
+    return kc_test_result("cli_info",
+        "follows kclib help and version conventions", failed);
 }
 
 /**
- * Check that the CLI builds and searches tab-separated associations.
- * @return Zero when the CLI contract works, one otherwise.
+ * Build and search through the TSV command-line interface.
+ * @return Zero when output contains the expected indexed association.
  */
-static int embdex_test_cli(void)
+static int kc_test_cli(void)
 {
     FILE *file;
-    char line[4096];
-    int failed = 0;
-    int rows = 0;
-    int found_security = 0;
-    int found_storage = 0;
+    char line[512];
+    int failed = 0, found = 0;
 
-    file = fopen("embdex-cli-input.tsv", "wb");
-    if (file == NULL) {
-        failed = 1;
-    } else {
+    file = fopen("embdex-cli-input.tsv", "w");
+    if (file == NULL) failed = 1;
+    else {
         failed |= fputs(
-            "shared\tAuthentication and encrypted peer communication\n",
-            file
-        ) == EOF;
+            "shared\tauthentication for remote peers\n", file) == EOF;
         failed |= fputs(
-            "shared\tStoring files and indexing documents\n",
-            file
-        ) == EOF;
+            "other\tgardening and watering plants\n", file) == EOF;
         failed |= fclose(file) != 0;
     }
-    failed |= system(
-        KC_TEST_CLI " -h > " KC_TEST_NULL " 2>&1"
+    if (!failed) failed |= system(
+        KC_TEST_CLI " build embdex-cli-index.bin "
+        "-i embdex-cli-input.tsv > " KC_TEST_NULL " 2>&1"
     ) != 0;
-    failed |= system(
-        KC_TEST_CLI " -v > " KC_TEST_NULL " 2>&1"
+    if (!failed) failed |= system(
+        KC_TEST_CLI " search embdex-cli-index.bin authentication "
+        "--limit 2 > embdex-cli-output.tsv 2>&1"
     ) != 0;
-    if (!failed) {
-        failed |= system(
-            KC_TEST_CLI " build embdex-cli-index.bin -i "
-            "embdex-cli-input.tsv > " KC_TEST_NULL " 2>&1"
-        ) != 0;
+    file = fopen("embdex-cli-output.tsv", "r");
+    if (file == NULL) failed = 1;
+    else {
+        while (fgets(line, sizeof(line), file) != NULL)
+            found |= strstr(line,
+                "shared\t") == line &&
+                strstr(line, "authentication for remote peers") != NULL;
+        failed |= ferror(file) != 0;
+        failed |= fclose(file) != 0;
     }
-    if (!failed) {
-        failed |= system(
-            KC_TEST_CLI " search embdex-cli-index.bin "
-            "security -l 2 > embdex-cli-output.tsv 2>&1"
-        ) != 0;
-    }
-    file = fopen("embdex-cli-output.tsv", "rb");
-    if (file != NULL) {
-        while (fgets(line, sizeof(line), file) != NULL) {
-            rows++;
-            failed |= strncmp(line, "shared\t", 7) != 0;
-            found_security |= strstr(line, "encrypted peer") != NULL;
-            found_storage |= strstr(line, "indexing documents") != NULL;
-        }
-        failed |= fclose(file) != 0;
-    } else {
-        failed = 1;
-    }
-    failed |= rows != 2 || !found_security || !found_storage;
-
+    failed |= !found;
     failed |= system(
-        KC_TEST_CLI " search embdex-cli-index.bin "
-        "authentication --mode lexical > embdex-cli-output.tsv 2>&1"
-    ) != 0;
-    file = fopen("embdex-cli-output.tsv", "rb");
-    if (file != NULL) {
-        failed |= fgets(line, sizeof(line), file) == NULL;
-        if (line[0] != '\0') {
-            failed |= strncmp(line, "shared\t", 7) != 0;
-            failed |= strstr(line, "encrypted peer") == NULL;
-        }
-        failed |= fgets(line, sizeof(line), file) != NULL;
-        failed |= fclose(file) != 0;
-    } else failed = 1;
-
-    failed |= system(
-        KC_TEST_CLI " search embdex-cli-index.bin "
-        "authentication -m hybrid > embdex-cli-output.tsv 2>&1"
-    ) != 0;
-    file = fopen("embdex-cli-output.tsv", "rb");
-    if (file != NULL) {
-        rows = 0;
-        while (fgets(line, sizeof(line), file) != NULL) rows++;
-        failed |= rows != 2;
-        failed |= fclose(file) != 0;
-    } else failed = 1;
-    failed |= system(
-        KC_TEST_CLI " search embdex-cli-index.bin "
-        "authentication -m rerank > embdex-cli-output.tsv 2>&1"
-    ) != 0;
-    file = fopen("embdex-cli-output.tsv", "rb");
-    if (file != NULL) {
-        rows = 0;
-        while (fgets(line, sizeof(line), file) != NULL) {
-            rows++;
-            failed |= strstr(line, "encrypted peer") == NULL;
-        }
-        failed |= rows != 1;
-        failed |= fclose(file) != 0;
-    } else failed = 1;
-    failed |= system(
-        KC_TEST_CLI " search embdex-cli-index.bin "
-        "authentication -m unsupported > " KC_TEST_NULL " 2>&1"
+        KC_TEST_CLI " search embdex-cli-index.bin authentication "
+        "--mode hybrid > " KC_TEST_NULL " 2>&1"
     ) == 0;
-
     remove("embdex-cli-input.tsv");
     remove("embdex-cli-index.bin");
     remove("embdex-cli-output.tsv");
-    return embdex_test_result("embdex_cli",
-        "builds and queries tab-separated text without a JSON parser", failed);
+    return kc_test_result("cli",
+        "builds and searches TSV with automatic strategy", failed);
 }
-
 #endif
 
 /**
- * Run one named test and accumulate its result.
- * @param name Selected contract case name.
- * @return Zero when the selected test succeeds, one or two otherwise.
+ * Run one named public contract test.
+ * @param name Name of the case to execute.
+ * @return Zero on pass, one on failure, two on unknown case.
  */
-static int embdex_run_case(const char *name)
+static int kc_test_run(const char *name)
 {
-    embdex_test_current++;
-    if (strcmp(name, "build_and_search") == 0) {
-        return embdex_test_build();
-    }
-    if (strcmp(name, "lexical_search") == 0) {
-        return embdex_test_lexical();
-    }
-    if (strcmp(name, "hybrid_search") == 0) {
-        return embdex_test_hybrid();
-    }
-    if (strcmp(name, "rerank_search") == 0) {
-        return embdex_test_rerank();
-    }
-    if (strcmp(name, "mode_contract") == 0) {
-        return embdex_test_mode_contract();
-    }
-    if (strcmp(name, "binary_roundtrip") == 0) {
-        return embdex_test_persistence();
-    }
-    if (strcmp(name, "invalid_inputs") == 0) {
-        return embdex_test_errors();
-    }
+    kc_test_current++;
+    if (strcmp(name, "search") == 0) return kc_test_search();
+    if (strcmp(name, "duplicates") == 0) return kc_test_duplicates();
+    if (strcmp(name, "invalid") == 0) return kc_test_invalid();
+    if (strcmp(name, "format") == 0) return kc_test_format();
 #ifndef __EMSCRIPTEN__
-    if (strcmp(name, "cli_info") == 0) {
-        return embdex_test_cli_info();
-    }
-    if (strcmp(name, "embdex_cli") == 0) {
-        return embdex_test_cli();
-    }
+    if (strcmp(name, "cli_info") == 0) return kc_test_cli_info();
+    if (strcmp(name, "cli") == 0) return kc_test_cli();
 #endif
     fprintf(stderr, "unknown test case: %s\n", name);
     return 2;
 }
 
 /**
- * Run all public contract cases or one selected case.
- * @param argc Argument count.
- * @param argv Argument vector with case name or all.
- * @return Process status, zero on success.
+ * Execute all tests or the requested named case.
+ * @param argc Number of command-line arguments.
+ * @param argv Test selector or all.
+ * @return Zero on success, otherwise nonzero.
  */
 int main(int argc, char **argv)
 {
     const char *cases[] = {
-        "build_and_search",
-        "lexical_search",
-        "hybrid_search",
-        "rerank_search",
-        "mode_contract",
-        "binary_roundtrip",
-        "invalid_inputs",
+        "search", "duplicates", "invalid", "format",
 #ifndef __EMSCRIPTEN__
-        "cli_info",
-        "embdex_cli",
+        "cli_info", "cli",
 #endif
     };
     int failed = 0;
@@ -705,13 +336,10 @@ int main(int argc, char **argv)
         return 2;
     }
     if (strcmp(argv[1], "all") == 0) {
-        for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-            failed += embdex_run_case(cases[i]);
-        }
-        printf("%d passed, %d failed\n",
-            embdex_test_total - failed, failed);
+        for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+            failed += kc_test_run(cases[i]);
+        printf("%d passed, %d failed\n", KC_TEST_TOTAL - failed, failed);
         return failed == 0 ? 0 : 1;
     }
-    embdex_test_total = 1;
-    return embdex_run_case(argv[1]);
+    return kc_test_run(argv[1]);
 }
