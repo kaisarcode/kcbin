@@ -685,6 +685,9 @@ typedef struct {
     double semantic;
     int semantic_found;
     int full_phrase;
+    int accepted;
+    double score;
+    const char *reason;
 } kc_embdex_evidence_t;
 
 typedef struct {
@@ -929,9 +932,12 @@ static int kc_embdex_contains(const char *document,
     const char *phrase, size_t length)
 {
     for (const char *p = document; *p; p++) {
+        size_t remaining;
+
         if (p != document && p[-1] != ' ') continue;
-        if (strncmp(p, phrase, length) == 0 &&
-            (p[length] == '\0' || p[length] == ' '))
+        remaining = strlen(p);
+        if (remaining >= length && strncmp(p, phrase, length) == 0 &&
+            (remaining == length || p[length] == ' '))
             return 1;
     }
     return 0;
