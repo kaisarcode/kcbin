@@ -196,8 +196,8 @@ test:
 		fi; \
 		node="$(WASM_NODE)"; \
 		if [ -n "$(EMSDK_NODE)" ]; then node="$(EMSDK_NODE)"; fi; \
-		if ! command -v "$node" >/dev/null 2>&1; then \
-			echo "Missing Emscripten test runtime: $node" >&2; exit 1; \
+		if ! command -v "$$node" >/dev/null 2>&1; then \
+			echo "Missing Emscripten test runtime: $$node" >&2; exit 1; \
 		fi; \
 		$(MAKE) -s --no-print-directory wasm/wasm32 || exit 1; \
 		mkdir -p "$(BUILD_DIR)/test-wasm" || exit 1; \
@@ -210,7 +210,7 @@ test:
 			"$(KCDIST_DIR)/libhnsw.c/wasm/wasm32/libhnsw.a" \
 			"$(KCDIST_DIR)/libmmap.c/wasm/wasm32/libmmap.a" \
 			-lm -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 || exit 1; \
-		(cd "$(BUILD_DIR)/test-wasm" && "$node" semidx-test.js all); \
+		(cd "$(BUILD_DIR)/test-wasm" && "$$node" semidx-test.js all); \
 	elif [ -n "$(filter wine,$(MAKECMDGOALS))" ]; then \
 		if ! command -v "$(WINE)" >/dev/null 2>&1; then \
 			echo "Missing Wine runtime: $(WINE)" >&2; exit 1; \
@@ -249,8 +249,8 @@ test:
 		cp "$(BIN_DIR)/$(NATIVE_TARGET)/semidx$(TARGET_CLI_EXT)" \
 			"$(BUILD_DIR)/test/" || exit 1; \
 		(cd "$(BUILD_DIR)/test" && \
-			LD_LIBRARY_PATH="$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET):$LD_LIBRARY_PATH" \
-			DYLD_LIBRARY_PATH="$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET):$DYLD_LIBRARY_PATH" \
+			LD_LIBRARY_PATH="$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET):$$LD_LIBRARY_PATH" \
+			DYLD_LIBRARY_PATH="$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET):$$DYLD_LIBRARY_PATH" \
 			./semidx-test all); \
 	fi
 
