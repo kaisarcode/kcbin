@@ -48,6 +48,10 @@ resolve_project() {
         printf '%s\n' "$proj_dir/$name"
         return 0
     fi
+    if [ -f "$proj_dir/$name.c/Makefile" ]; then
+        printf '%s\n' "$proj_dir/$name.c"
+        return 0
+    fi
     if [ -f "$proj_dir/lib$name.c/Makefile" ]; then
         printf '%s\n' "$proj_dir/lib$name.c"
         return 0
