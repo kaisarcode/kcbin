@@ -87,9 +87,22 @@ Search automatically combines independent candidate discovery:
     Cosine similarity scans small indexes directly; HNSW handles larger ones.
 
 All evidence is accumulated under the internal document ordinal.
-The engine first decides whether the evidence is sufficient, then ranks
-only accepted associations. BM25 supplies discovery order; a BM25 hit
-alone cannot turn an unrelated association into an accepted result.
+When whole associations match contiguous spans of a query, a bounded
+literal-covering pass finds the two highest-scoring segmentations.
+Longer phrases and fewer fragments are preferred, while component words
+remain independently eligible for retrieval. For example, a map with
+`quiero`, `tomar`, `agua`, and `tomar agua` favors the association
+`tomar agua` in the full covering `quiero + tomar agua` over separate
+word hits `quiero + tomar + agua`. Dictionary-normalized spans also
+participate, with original-text literals breaking ties.
+
+The coverings contribute ranking evidence to the associations. The public
+search API still returns a flat, ranked set of independent associations,
+not an orchestration graph or an array of grouped paths.
+
+The engine otherwise first decides whether the evidence is sufficient,
+then ranks accepted associations. BM25 supplies discovery order; a BM25
+hit alone cannot turn an unrelated association into an accepted result.
 
 Lexical coverage is weighted by the rarity of the original normalized
 query words. Terms absent from the index are assigned singleton rarity
@@ -206,7 +219,8 @@ to a word or guarantee that an arbitrary query has a correct result.
 
 Set `KC_EMBDEX_WORDMAP_VARIANTS` to change the variant budget (default 8,
 maximum 16). `KC_EMBDEX_TRACE` records candidate evidence, including
-`mapped`, `mapped_bm25_rank`, `fusion_rrf`, and `variant_scores`.
+`mapped`, `mapped_bm25_rank`, `composition_rank`,
+`literal_starts`, `mapped_starts`, `fusion_rrf`, and `variant_scores`.
 `KC_EMBDEX_WORDMAP_TRACE` records the actual substituted query strings.
 These traces are optional and contain the input text.
 
