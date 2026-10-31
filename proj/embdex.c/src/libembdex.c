@@ -1610,7 +1610,8 @@ static void kc_embdex_wordmap_trace(const char *original,
  */
 static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
     const kc_embdex_evidence_t *evidence, size_t count,
-    double semantic_threshold)
+    double semantic_threshold, const double *variant_scores,
+    size_t variant_count, size_t variant_stride)
 {
     const char *path = getenv("KC_EMBDEX_TRACE");
     FILE *file;
@@ -1648,10 +1649,19 @@ static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
         else fputs("null", file);
         fprintf(file, ",\"semantic_rank\":%zu,\"variant\":%zu,"
             "\"variants_evaluated\":%zu,\"candidate_threshold\":%.9g,"
-            "\"final_rank\":%zu,\"reason\":",
+            "\"final_rank\":%zu,\"variant_scores\":[",
             item->semantic_rank, item->semantic_variant,
             item->variants_evaluated, item->semantic_threshold,
             item->final_rank);
+        for (size_t k = 0; k < variant_count; k++) {
+            double cosine = variant_scores == NULL ? NAN :
+                variant_scores[i * variant_stride + k];
+
+            if (k != 0) fputc(',', file);
+            if (isfinite(cosine)) fprintf(file, "%.9g", cosine);
+            else fputs("null", file);
+        }
+        fputs("],\"reason\":", file);
         kc_embdex_json_string(file,
             item->reason == NULL ? "not_discovered" : item->reason);
         fputs("}\n", file);
@@ -1799,6 +1809,9 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     float *embedding = NULL;
     size_t dimension = 0, limit = 10, window, lexical_count = 0;
     size_t semantic_count = 0, rank_count = 0, variants = 1;
+    size_t unique_variants = 0;
+    char *variant_text[16] = {0};
+    double *variant_scores = NULL;
     double weights[KC_EMBDEX_QUERY_TOKENS] = {0};
     double total_weight = 0;
     int status = KC_EMBDEX_OK;
@@ -1972,6 +1985,23 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
 
     status = kc_embdex_variant_count(index, &tokens, &variants);
     if (status != KC_EMBDEX_OK) goto finished;
+    if (getenv("KC_EMBDEX_TRACE") != NULL &&
+        getenv("KC_EMBDEX_TRACE")[0] != '\0')
+    {
+        if (index->count > SIZE_MAX / variants ||
+            index->count * variants > SIZE_MAX / sizeof(double)) {
+            status = KC_EMBDEX_ENOMEM;
+            goto finished;
+        }
+        variant_scores = (double *)malloc(index->count *
+            variants * sizeof(*variant_scores));
+        if (variant_scores == NULL) {
+            status = KC_EMBDEX_ENOMEM;
+            goto finished;
+        }
+        for (size_t i = 0; i < index->count * variants; i++)
+            variant_scores[i] = NAN;
+    }
     {
         int exact_full = 0;
 
@@ -1980,9 +2010,26 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         if (tokens.truncated || !exact_full || limit != 1) {
             for (size_t variant = 0; variant < variants; variant++) {
                 double candidate_floor;
+                char *mapped = NULL;
+                int repeated = 0;
 
-                status = kc_embdex_embed_text(index, query, variant,
-                    &embedding, &dimension);
+                status = kc_embdex_transform_text(index, query,
+                    variant, &mapped);
+                if (status != KC_EMBDEX_OK) goto finished;
+                for (size_t k = 0; k < unique_variants; k++) {
+                    if (strcmp(mapped, variant_text[k]) == 0) {
+                        repeated = 1;
+                        break;
+                    }
+                }
+                if (repeated) {
+                    free(mapped);
+                    continue;
+                }
+                variant_text[unique_variants] = mapped;
+                kc_embdex_wordmap_trace(query, mapped, variant);
+                status = kc_emb_embed(mapped, &embedding, &dimension) ==
+                    KC_EMB_OK ? KC_EMBDEX_OK : KC_EMBDEX_EEMBED;
                 if (status != KC_EMBDEX_OK) goto finished;
                 if (dimension != index->dimension) {
                     status = KC_EMBDEX_EEMBED;
@@ -1995,6 +2042,9 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                         double cosine = kc_embdex_cosine(index, i, embedding);
                         kc_embdex_evidence_t *item = &evidence[i];
 
+                        if (variant_scores != NULL)
+                            variant_scores[i * variants +
+                                unique_variants] = cosine;
                         if (!item->semantic_measured ||
                             cosine > item->semantic)
                         {
@@ -2031,6 +2081,9 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                             goto finished;
                         }
                         item = &evidence[(size_t)ordinal];
+                        if (variant_scores != NULL)
+                            variant_scores[(size_t)ordinal * variants +
+                                unique_variants] = semantic[i].score;
                         if (!item->semantic_measured ||
                             semantic[i].score > item->semantic)
                         {
@@ -2044,6 +2097,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                     kc_hnsw_free(semantic);
                     semantic = NULL;
                 }
+                unique_variants++;
                 kc_emb_free(embedding);
                 embedding = NULL;
                 dimension = 0;
@@ -2055,7 +2109,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                     if (!evidence[i].semantic_measured) continue;
                     ranks[candidates].ordinal = i;
                     ranks[candidates++].score = evidence[i].semantic;
-                    evidence[i].variants_evaluated = variants;
+                    evidence[i].variants_evaluated = unique_variants;
                 }
                 qsort(ranks, candidates, sizeof(*ranks),
                     kc_embdex_rank_compare);
@@ -2125,12 +2179,16 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
 finished:
     if (status == KC_EMBDEX_OK && evidence != NULL && tokens.count > 0)
         kc_embdex_trace(index, query, evidence, index->count,
-            semantic_only_floor);
+            semantic_only_floor, variant_scores, unique_variants, variants);
     kc_bm25_free(lexical);
     kc_hnsw_free(semantic);
     kc_emb_free(embedding);
     kc_embdex_tokens_close(&tokens);
     free(joined);
+    for (size_t i = 0; i < unique_variants ||
+        (i < 16 && variant_text[i] != NULL); i++)
+        free(variant_text[i]);
+    free(variant_scores);
     free(evidence);
     free(ranks);
     return status;
