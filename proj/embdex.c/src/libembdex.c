@@ -858,6 +858,7 @@ static int kc_embdex_prepare_mapped_lexical(kc_embdex_t *index)
  * @param count Number of entries in the corpus.
  * @param dictionaries Dictionary paths, or NULL when absent.
  * @param dictionary_count Number of dictionary paths.
+ * @param options Optional build progress notifications.
  * @return KC_EMBDEX_OK or a negative status code.
  */
 static int kc_embdex_create(
@@ -865,7 +866,8 @@ static int kc_embdex_create(
     const kc_embdex_document_t *documents,
     size_t count,
     const char *const *dictionaries,
-    size_t dictionary_count
+    size_t dictionary_count,
+    const kc_embdex_build_options_t *options
 )
 {
     kc_embdex_t *index;
@@ -883,6 +885,8 @@ static int kc_embdex_create(
             return KC_EMBDEX_EINVAL;
         }
     }
+    if (options != NULL && options->progress != NULL)
+        options->progress(KC_EMBDEX_BUILD_PREPARE, 0, 0, options->userdata);
 
     index = kc_embdex_allocate(count);
     if (index == NULL) {
@@ -916,6 +920,9 @@ static int kc_embdex_create(
     if (status != KC_EMBDEX_OK) goto failure;
     status = kc_embdex_prepare_mapped_lexical(index);
     if (status != KC_EMBDEX_OK) goto failure;
+    if (options != NULL && options->progress != NULL)
+        options->progress(KC_EMBDEX_BUILD_EMBED, 0, count,
+            options->userdata);
     for (size_t i = 0; i < count; i++) {
         size_t length = 0;
 
@@ -926,6 +933,9 @@ static int kc_embdex_create(
             status = KC_EMBDEX_EEMBED;
             goto failure;
         }
+        if (options != NULL && options->progress != NULL)
+            options->progress(KC_EMBDEX_BUILD_EMBED, i + 1, count,
+                options->userdata);
     }
     *out = index;
     return KC_EMBDEX_OK;
@@ -1411,11 +1421,15 @@ finished:
  * @param path File destination.
  * @param documents Borrowed associations.
  * @param count Number of associations.
+ * @param dictionaries Dictionary paths, or NULL when absent.
+ * @param dictionary_count Number of dictionary paths.
+ * @param options Optional progress callback.
  * @return KC_EMBDEX_OK or a negative error code.
  */
 int kc_embdex_build_with_dictionaries(const char *path,
     const kc_embdex_document_t *documents, size_t count,
-    const char *const *dictionaries, size_t dictionary_count)
+    const char *const *dictionaries, size_t dictionary_count,
+    const kc_embdex_build_options_t *options)
 {
     kc_embdex_t *index = NULL;
     int status;
@@ -1424,10 +1438,15 @@ int kc_embdex_build_with_dictionaries(const char *path,
         (dictionary_count > 0 && dictionaries == NULL))
         return KC_EMBDEX_EINVAL;
     status = kc_embdex_create(&index, documents, count,
-        dictionaries, dictionary_count);
+        dictionaries, dictionary_count, options);
     if (status != KC_EMBDEX_OK) return status;
+    if (options != NULL && options->progress != NULL)
+        options->progress(KC_EMBDEX_BUILD_SAVE, 0, 0, options->userdata);
     status = kc_embdex_save(index, path);
     kc_embdex_close(index);
+    if (status == KC_EMBDEX_OK &&
+        options != NULL && options->progress != NULL)
+        options->progress(KC_EMBDEX_BUILD_DONE, 0, 0, options->userdata);
     return status;
 }
 
@@ -1442,7 +1461,7 @@ int kc_embdex_build(const char *path,
     const kc_embdex_document_t *documents, size_t count)
 {
     return kc_embdex_build_with_dictionaries(
-        path, documents, count, NULL, 0);
+        path, documents, count, NULL, 0, NULL);
 }
 
 typedef struct {
