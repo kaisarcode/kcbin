@@ -118,7 +118,8 @@ int kc_semidx_search(
  * @param query UTF-8 search query.
  * @param mode KC_SEMIDX_MODE_* search mode.
  * @param options Optional result limit and cosine threshold.
- * @param out_results Receives caller-owned results, released with kc_semidx_free().
+ * @param out_results Receives caller-owned results.
+ * Release results with kc_semidx_free().
  * @param out_count Receives the result count.
  * @return KC_SEMIDX_OK or an error status.
  */
