@@ -780,25 +780,27 @@ static int kc_test_cli(void)
         "> " KC_TEST_NULL " 2> embdex-cli-progress.txt"
     ) != 0;
     if (!failed) {
-        int prepare = 0, embed_start = 0, embed_end = 0;
-        int save = 0, done = 0;
+        int prepare = 0, embed_start = 0, embed_middle = 0;
+        int embed_end = 0, save = 0, done = 0;
 
         file = fopen("embdex-cli-progress.txt", "r");
         if (file == NULL) failed = 1;
         else {
             while (fgets(line, sizeof(line), file) != NULL) {
                 prepare |= strcmp(line, "embdex: preparing\n") == 0;
-                embed_start |= strcmp(line,
-                    "embdex: embeddings 0% (0/2)\n") == 0;
-                embed_end |= strcmp(line,
-                    "embdex: embeddings 100% (2/2)\n") == 0;
+                embed_start |= strstr(line,
+                    "\rembdex: embeddings 0% (0/2)") != NULL;
+                embed_middle |= strstr(line,
+                    "\rembdex: embeddings 50% (1/2)") != NULL;
+                embed_end |= strstr(line,
+                    "\rembdex: embeddings 100% (2/2)") != NULL;
                 save |= strcmp(line, "embdex: saving\n") == 0;
                 done |= strcmp(line, "embdex: done\n") == 0;
             }
             failed |= ferror(file) != 0;
             failed |= fclose(file) != 0;
-            failed |= !prepare || !embed_start || !embed_end ||
-                !save || !done;
+            failed |= !prepare || !embed_start || !embed_middle ||
+                !embed_end || !save || !done;
         }
     }
     remove("embdex-cli-progress.txt");
