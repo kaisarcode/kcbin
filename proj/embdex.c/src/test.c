@@ -255,6 +255,11 @@ static int kc_test_relevance(void)
         failed |= result.count == 0 ||
             strcmp(result.first_id, "meatball") != 0;
         result = (kc_embdex_match_test_t){0};
+        failed |= kc_embdex_search(index, "albondigas casers lloviendo",
+            NULL, kc_test_match, &result) != KC_EMBDEX_OK;
+        failed |= result.count == 0 ||
+            strcmp(result.first_id, "meatball") != 0;
+        result = (kc_embdex_match_test_t){0};
         failed |= kc_embdex_search(index, "salsa de tomate", NULL,
             kc_test_match, &result) != KC_EMBDEX_OK;
         failed |= result.count == 0 ||
