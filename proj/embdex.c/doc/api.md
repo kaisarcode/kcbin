@@ -166,11 +166,21 @@ KC_EMBDEX_WORDMAP=wordmap-es-en.tsv \
 ```
 
 The corpus embeddings use the **first** English translation for each word.
-Queries can test up to 16 deterministic alternative word combinations;
-each resulting embedding is evaluated against the corpus, and the best
-cosine for each association enters normal acceptance and ranking.
-This does not claim that selecting the largest cosine is always a better
-match: more comparisons may also increase false positives.
+Queries can test up to 16 deterministic mixed-radix word combinations.
+The actual number is bounded by the available translations and the
+configured budget. Identical pseudo-English strings are recognized
+before inference and embedded once. Every distinct result is evaluated
+against the corpus, and the highest cosine per association remains the
+experimental acceptance and ranking input.
+
+When `KC_EMBDEX_TRACE` is enabled, `variant_scores` records one cosine
+per distinct candidate text for each association. `variants_requested`
+and `variants_evaluated` expose how many candidate combinations were
+considered and how many actually required model inference. The winning
+combination is identified by `variant`. Candidates not visited by HNSW
+have null entries in their individual similarity series. These arrays
+are diagnostic; the current ranking policy still uses the maximum
+cosine, which may also increase false positives.
 
 The `KC_EMBDEX_WORDMAP_VARIANTS` budget defaults to 8 when ambiguous words
 are present (1 disables alternative combinations). Indexes with no
