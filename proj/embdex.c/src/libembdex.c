@@ -2078,6 +2078,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                         double cosine = kc_embdex_cosine(index, i, embedding);
                         kc_embdex_evidence_t *item = &evidence[i];
 
+                        ranks[i].ordinal = i;
+                        ranks[i].score = cosine;
                         if (variant_scores != NULL)
                             variant_scores[i * variants +
                                 unique_variants] = cosine;
@@ -2090,13 +2092,6 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                             item->semantic_threshold = candidate_floor;
                             item->semantic_variant = variant;
                         }
-                    }
-                    for (size_t i = 0; i < index->count; i++) {
-                        ranks[i].ordinal = i;
-                        ranks[i].score = evidence[i].semantic_measured &&
-                            evidence[i].semantic_variant == variant ?
-                            evidence[i].semantic : 
-                            kc_embdex_cosine(index, i, embedding);
                     }
                     qsort(ranks, index->count, sizeof(*ranks),
                         kc_embdex_rank_compare);
@@ -2145,6 +2140,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                             item->semantic_variant = variant;
                         }
                     }
+                    qsort(ranks, semantic_count, sizeof(*ranks),
+                        kc_embdex_rank_compare);
                     for (size_t i = 0; i < semantic_count; i++) {
                         size_t ordinal = ranks[i].ordinal;
 
