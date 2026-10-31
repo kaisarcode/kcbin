@@ -1239,7 +1239,8 @@ static double kc_embdex_score(const kc_embdex_evidence_t *item,
 /**
  * Find relevant associations from independent lexical and semantic evidence.
  * Query coverage, phrase matching and edit-distance uncertainty influence
- * selection; a fixed similarity floor excludes weak uncorroborated neighbors.
+ * selection; lexical and semantic candidates are admitted through separate
+ * confidence checks before ranking.
  * @param index Opened persistent index.
  * @param query Natural-language text.
  * @param options Optional maximum number of results.
