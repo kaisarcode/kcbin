@@ -53,6 +53,15 @@ over a longer invented one. A qualifier is correct when it expresses
 an actual, necessary distinction; otherwise omit it. Do not use
 unrelated renames as incidental cleanup.
 
+Do not encode incidental implementation or representation details into names
+when there is no meaningful alternative. For example, use `input`, not
+`input_base64`, when there is only one input and the encoding does not
+distinguish it from another input; use `Options`, not `Common options`,
+when there is only one options section. A qualifier describing a format,
+storage mechanism, transport, or role belongs in the name only when it is a
+necessary part of the public contract or disambiguates actual alternatives.
+Never imply that a second variant exists when it does not.
+
 ## Mandatory KCS and interface consistency
 
 KCS and established KaisarCode conventions are mandatory for **all**
