@@ -88,12 +88,16 @@ Search automatically combines independent candidate discovery:
 All evidence is accumulated under the internal document ordinal. Exact
 phrase coverage, distinct matched query positions, spelling uncertainty,
 lexical rank and cosine similarity determine which associations survive
-selection and their ordering. A candidate can be discovered by any
+selection and their ordering. Coverage uses corpus-relative term rarity,
+so common words contribute less than distinctive terms. A candidate can be discovered by any
 mechanism without first passing another mechanism's filter.
 
 For a single requested result, a complete normalized phrase match can
-avoid model inference. Queries with no sufficient evidence can return no
-results, even when the vector index has a nearest neighbor. The current
+avoid model inference. Independent semantic candidates must pass both an
+absolute similarity floor and a threshold relative to the query's similarity
+to a bounded sample of indexed associations. Queries with no sufficient
+evidence can return no results, even when the vector index has a nearest
+neighbor. The current
 confidence thresholds and score weights are implementation policy, not
 independently validated quality guarantees for every dataset.
 
