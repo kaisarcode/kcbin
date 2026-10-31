@@ -27,14 +27,15 @@
 #define KC_EMBDEX_BUILD_VERSION 0
 #endif
 
-#define KC_EMBDEX_HEADER_SIZE 68U
+#define KC_EMBDEX_HEADER_SIZE 72U
+#define KC_EMBDEX_FORMAT_VERSION 1U
 #define KC_EMBDEX_MODEL_SIZE 32U
 #define KC_EMBDEX_EXACT_LIMIT 256U
 #define KC_EMBDEX_QUERY_TOKENS 64U
 #define KC_EMBDEX_FUZZY_CHOICES 8U
 
 static const unsigned char kc_embdex_magic[8] = {
-    'K', 'C', 'S', 'I', 'D', 'X', '\r', '\n'
+    'K', 'C', 'E', 'M', 'B', 'D', 'X', '\n'
 };
 static const char kc_embdex_model[KC_EMBDEX_MODEL_SIZE] =
     "bge-small-en-v1.5";
@@ -384,11 +385,12 @@ static int kc_embdex_load_records(kc_embdex_t *index)
     }
     data = (const unsigned char *)bytes;
     if (memcmp(data, kc_embdex_magic, 8) != 0 ||
-        memcmp(data + 20, kc_embdex_model, KC_EMBDEX_MODEL_SIZE) != 0)
+        kc_embdex_read_u32(data + 8) != KC_EMBDEX_FORMAT_VERSION ||
+        memcmp(data + 24, kc_embdex_model, KC_EMBDEX_MODEL_SIZE) != 0)
         return KC_EMBDEX_EFORMAT;
     {
-        uint64_t lexical_offset = kc_embdex_read_u64(data + 52);
-        uint64_t lexical_size = kc_embdex_read_u64(data + 60);
+        uint64_t lexical_offset = kc_embdex_read_u64(data + 56);
+        uint64_t lexical_size = kc_embdex_read_u64(data + 64);
 
         if (lexical_offset > size || lexical_size == 0 ||
             lexical_size > size - lexical_offset ||
@@ -397,8 +399,8 @@ static int kc_embdex_load_records(kc_embdex_t *index)
         index->lexical_offset = (size_t)lexical_offset;
         index->lexical_size = (size_t)lexical_size;
     }
-    index->dimension = kc_embdex_read_u32(data + 8);
-    count = kc_embdex_read_u64(data + 12);
+    index->dimension = kc_embdex_read_u32(data + 12);
+    count = kc_embdex_read_u64(data + 16);
     if (index->dimension == 0 || index->dimension != kc_emb_dimension() ||
         index->dimension > SIZE_MAX / sizeof(float) ||
         count > SIZE_MAX / sizeof(kc_embdex_record_t)) {
@@ -596,11 +598,12 @@ static int kc_embdex_save(const kc_embdex_t *index, const char *path)
         return KC_EMBDEX_ENOMEM;
     }
     memcpy(data, kc_embdex_magic, 8);
-    kc_embdex_write_u32(data + 8, (uint32_t)index->dimension);
-    kc_embdex_write_u64(data + 12, (uint64_t)index->count);
-    memcpy(data + 20, kc_embdex_model, KC_EMBDEX_MODEL_SIZE);
-    kc_embdex_write_u64(data + 52, (uint64_t)record_size);
-    kc_embdex_write_u64(data + 60, (uint64_t)lexical_size);
+    kc_embdex_write_u32(data + 8, KC_EMBDEX_FORMAT_VERSION);
+    kc_embdex_write_u32(data + 12, (uint32_t)index->dimension);
+    kc_embdex_write_u64(data + 16, (uint64_t)index->count);
+    memcpy(data + 24, kc_embdex_model, KC_EMBDEX_MODEL_SIZE);
+    kc_embdex_write_u64(data + 56, (uint64_t)record_size);
+    kc_embdex_write_u64(data + 64, (uint64_t)lexical_size);
 
     for (size_t i = 0; i < index->count; i++) {
         size_t id_length = strlen(index->records[i].id);
