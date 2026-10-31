@@ -507,7 +507,6 @@ static int kc_test_semantic_fallback(void)
     if (!failed) {
         failed |= kc_test_trace_env(trace_path) != 0;
         if (!failed) {
-            /* A complete query made of several associations, Top K > 1. */
             failed |= kc_embdex_search(index, "quiero tomar agua", NULL,
                 kc_test_composition_receive, &results) != KC_EMBDEX_OK;
             failed |= kc_test_trace_embeddings(trace_path, 0);
@@ -515,7 +514,6 @@ static int kc_test_semantic_fallback(void)
         remove(trace_path);
         results = (kc_test_composition_t){0};
         if (!failed) {
-            /* A single literal term also bypasses the model. */
             failed |= kc_embdex_search(index, "tomar", NULL,
                 kc_test_composition_receive, &results) != KC_EMBDEX_OK;
             failed |= kc_test_trace_embeddings(trace_path, 0);
@@ -523,7 +521,6 @@ static int kc_test_semantic_fallback(void)
         remove(trace_path);
         results = (kc_test_composition_t){0};
         if (!failed) {
-            /* Missing terms require semantic retrieval. */
             failed |= kc_embdex_search(index, "quiero tomar desconocido",
                 NULL, kc_test_composition_receive,
                 &results) != KC_EMBDEX_OK;

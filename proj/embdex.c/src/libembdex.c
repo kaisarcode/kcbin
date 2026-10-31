@@ -377,7 +377,6 @@ static size_t kc_embdex_variant_choice(const kc_embdex_variant_plan_t *plan,
     if (plan == NULL || plan->exhaustive)
         return (variant / stride) % choices;
     if (plan->ambiguous == 1) return variant % choices;
-    /* Four staggered bits cover the full sentence within 16 variants. */
     while (((size_t)1 << bits) < plan->count) bits++;
     mask = (size_t)1 << (occurrence % bits);
     if (occurrence >= bits && bits > 1) {
@@ -388,12 +387,6 @@ static size_t kc_embdex_variant_choice(const kc_embdex_variant_plan_t *plan,
     return 1 + ((variant + occurrence) % (choices - 1));
 }
 
-/**
- * Load an experimental UTF-8 TSV map of normalized words to English words.
- * Mapping is deliberately optional and leaves lexical evidence unchanged.
- * @param index Index with an initialized BM25 analyzer.
- * @return KC_EMBDEX_OK or an error on invalid mappings and I/O.
- */
 /**
  * Append normalized substitution pairs from one independent TSV file.
  * File order determines the first translation for repeated source terms.
@@ -433,8 +426,6 @@ static int kc_embdex_wordmap_read_file(kc_embdex_t *index,
             break;
         }
         *tab++ = '\0';
-        /* Both columns are words. The analyzer validates UTF-8 and
-         * word boundaries; no language or alphabet is hardcoded. */
         {
             char *validated = NULL;
 
@@ -573,7 +564,6 @@ static int kc_embdex_wordmap_identity(kc_embdex_t *index)
     return written < 0 || (size_t)written >= sizeof(index->model_tag) ?
         KC_EMBDEX_EFORMAT : KC_EMBDEX_OK;
 }
-
 
 /**
  * Identify word bytes without treating punctuation as part of a word.
@@ -1235,8 +1225,6 @@ int kc_embdex_open(kc_embdex_t **out, const char *path)
             return KC_EMBDEX_EFORMAT;
         }
         version = kc_embdex_read_u32((const unsigned char *)header + 8);
-        /* Old indexes may still depend on an external wordmap.
-         * New mapped indexes are completely self-contained. */
         if (version == KC_EMBDEX_FORMAT_VERSION) {
             status = kc_embdex_model_identity(index->model_tag);
             if (status != KC_EMBDEX_OK) {
@@ -1526,6 +1514,13 @@ int kc_embdex_build_with_dictionaries(const char *path,
     return status;
 }
 
+/**
+ * Create a persistent index without dictionary substitutions.
+ * @param path Destination index file, replaced on success.
+ * @param documents Borrowed associations, or NULL when count is zero.
+ * @param count Number of associations.
+ * @return KC_EMBDEX_OK or a negative status code.
+ */
 int kc_embdex_build(const char *path,
     const kc_embdex_document_t *documents, size_t count)
 {
@@ -1602,7 +1597,6 @@ typedef struct {
     kc_embdex_evidence_t *evidence;
 } kc_embdex_phrase_context_t;
 
-/* One edge of a complete literal covering of the query. */
 typedef struct {
     double score;
     size_t ordinal;
@@ -1692,7 +1686,6 @@ static int kc_embdex_cover_rank(kc_embdex_evidence_t *evidence,
                     (item->literal_starts &
                         (UINT64_C(1) << position)) != 0)
                     continue;
-                /* A direct literal phrase wins a tie with a substitution. */
                 for (size_t slot = 0; slot < KC_EMBDEX_COVER_PATHS;
                     slot++)
                 {
@@ -2662,9 +2655,6 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
             variant_scores[i] = NAN;
     }
     {
-        /* Embeddings are a fallback, not mandatory for every query.
-         * A whole phrase or complete literal segmentation already
-         * supplies sufficient evidence regardless of result limit. */
         if (!tokens.truncated) {
             for (size_t i = 0; i < index->count; i++)
                 if (evidence[i].full_phrase)
@@ -2855,16 +2845,11 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         score = kc_embdex_score(item, coverage, precise,
             total_weight > 0 ? weight_corrected / total_weight : 0,
             phrase);
-        /* For several query translations, preserve lexical evidence and
-         * combine the maximum cosine with cross-variant ranking agreement.
-         * No additional embeddings or external model are needed. */
         if (unique_variants > 1 && item->semantic_found)
             score += 0.20 * (item->fusion_rrf - item->semantic);
         if (item->mapped_rank != 0)
             score += 0.05 * coverage *
                 (10.0 / (10.0 + (double)item->mapped_rank));
-        /* A complete literal covering outranks isolated semantic hits.
-         * The two best coverings preserve alternative segmentations. */
         if (item->composition_rank == 1) score += 6.0;
         else if (item->composition_rank == 2) score += 3.0;
         item->score = score;
