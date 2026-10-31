@@ -252,8 +252,9 @@ printf 'doc-1\tAuthentication between peers\n' | embdex build corpus.bin
 ```
 
 `-p` / `--progress` is optional for `build`. It reports preparation,
-embedding progress every 10%, saving and completion to standard error.
-The normal build prints no progress, and search accepts neither flag.
+embedding progress every 1% on a single refreshed terminal line,
+saving and completion to standard error. The normal build prints no
+progress, and search accepts neither flag.
 
 The first tab separates ID from content. Blank lines are ignored;
 nonblank lines must contain nonempty ID and content. Embedded tabs,
