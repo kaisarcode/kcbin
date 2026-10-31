@@ -349,13 +349,14 @@ static size_t kc_embdex_word_find(const kc_embdex_t *index,
 }
 
 /**
- * Select one substitution from a bounded set of combination candidates.
- * The first variant always uses the first translation from the dictionary.
- * Subsequent variants change different words on rotating mixed-radix digits,
- * including cases where multiple words change in one sentence.
+ * Select a translation for one word in a bounded query variant.
+ * Enumerate all combinations when possible; otherwise vary words across
+ * the entire query with staggered masks. The first variant is the baseline.
+ * @param plan Per-query budget and selection strategy.
  * @param variant Candidate combination ordinal.
- * @param stride Mixed-radix weight of this ambiguous word occurrence.
- * @param choices Number of possible translations for the word.
+ * @param occurrence Zero-based ambiguous word occurrence.
+ * @param stride Mixed-radix weight for exhaustive enumeration.
+ * @param choices Number of translations for the current word.
  * @return Translation ordinal.
  */
 static size_t kc_embdex_variant_choice(const kc_embdex_variant_plan_t *plan,
