@@ -71,7 +71,6 @@ struct kc_embdex {
 static void kc_embdex_wordmap_trace(const char *original,
     const char *mapped, size_t variant);
 
-
 /**
  * Check whether a bounded slice fits in an encoded buffer.
  * @param size Total buffer size.
@@ -404,7 +403,7 @@ static int kc_embdex_wordmap_load(kc_embdex_t *index)
             *p != '\0'; p++)
         {
             if (!((*p >= 'A' && *p <= 'Z') ||
-                  (*p >= 'a' && *p <= 'z')))
+                (*p >= 'a' && *p <= 'z')))
             {
                 status = KC_EMBDEX_EFORMAT;
                 break;
@@ -563,7 +562,6 @@ static int kc_embdex_transform_text(const kc_embdex_t *index,
                 end++;
             status = kc_embdex_word_normalize(index,
                 text + offset, end - offset, &normalized);
-            /* Non-lexical tokens remain in the original text. */
             if (status == KC_EMBDEX_EFORMAT) status = KC_EMBDEX_OK;
             else if (status != KC_EMBDEX_OK) break;
             if (normalized != NULL) {
@@ -575,7 +573,6 @@ static int kc_embdex_transform_text(const kc_embdex_t *index,
 
                     replacement = index->wordmap[first + choice].replacement;
                     if (alternatives > 1) {
-                        /* Only the first sixteen combinations are tested. */
                         stride = stride > 16 / alternatives ?
                             16 : stride * alternatives;
                     }
@@ -1909,8 +1906,6 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
             size_t frequency = exact_frequency;
             double rarity;
 
-            /* Unknown words have the rarity of a singleton, not infinity.
-             * Fuzzy postings never change the document frequency. */
             if (frequency == 0) frequency = 1;
             if (frequency > index->count) frequency = index->count;
             rarity = log(1.0 + ((double)(index->count - frequency) + 0.5) /
@@ -2035,7 +2030,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                     variant_text[unique_variants] = mapped;
                     kc_embdex_wordmap_trace(query, mapped, variant);
                 } else {
-                    mapped = (char *)query; /* Borrowed only for inference. */
+                    mapped = (char *)query;
                 }
                 status = kc_emb_embed(mapped, &embedding, &dimension) ==
                     KC_EMB_OK ? KC_EMBDEX_OK : KC_EMBDEX_EEMBED;
