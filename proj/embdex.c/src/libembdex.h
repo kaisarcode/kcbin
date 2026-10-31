@@ -1,6 +1,6 @@
 /**
- * libembdex.h - Semantic Index Public API
- * Summary: Build and query portable indexes of text associations.
+ * libembdex.h - Text association retrieval.
+ * Summary: Public API for building and searching portable indexes.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -29,11 +29,6 @@ typedef struct kc_embdex kc_embdex_t;
 #define KC_EMBDEX_ESTATE -7
 #define KC_EMBDEX_ELEXICAL -8
 
-#define KC_EMBDEX_MODE_SEMANTIC 1
-#define KC_EMBDEX_MODE_LEXICAL 2
-#define KC_EMBDEX_MODE_HYBRID 3
-#define KC_EMBDEX_MODE_RERANK 4
-
 typedef struct {
     const char *id;
     const char *content;
@@ -47,122 +42,82 @@ typedef struct {
 
 typedef struct {
     const size_t *limit;
-    const double *threshold;
 } kc_embdex_search_options_t;
 
 /**
- * Build an index from text associations, allowing duplicate and arbitrary IDs.
- * Input strings are borrowed for the call and copied into the index.
- * The caller owns the returned index and releases it with kc_embdex_close().
- * @param out Receives the newly built index.
- * @param documents Array of ID and content pairs, or NULL when count is zero.
- * @param count Number of documents in the array.
+ * Visit one relevant association. The result and its strings are borrowed
+ * for the duration of the callback. A nonzero return stops delivery without
+ * signaling a search failure.
+ * @param result Current relevant association and score.
+ * @param userdata Caller-provided context.
+ * @return Zero to continue, nonzero to stop delivering results.
+ */
+typedef int (*kc_embdex_result_fn)(
+    const kc_embdex_result_t *result,
+    void *userdata
+);
+
+/**
+ * Create and persist an index from independent ID/text associations.
+ * IDs may repeat. The input is borrowed for the duration of the call.
+ * On success the destination contains the complete reusable index; no
+ * separate save or close operation is required for building.
+ * @param path Destination index file, replaced on success.
+ * @param documents Array of associations, or NULL when count is zero.
+ * @param count Number of associations.
  * @return KC_EMBDEX_OK or a negative status code.
  */
 int kc_embdex_build(
-    kc_embdex_t **out,
+    const char *path,
     const kc_embdex_document_t *documents,
     size_t count
 );
 
 /**
- * Open a saved binary index using file-backed memory.
- * The source dataset is not needed; the HNSW graph is rebuilt in memory.
- * @param out Receives the opened index.
- * @param path Existing binary index file.
+ * Open an existing index for repeated queries.
+ * @param out Receives the opened index handle.
+ * @param path Path to the index file.
  * @return KC_EMBDEX_OK or a negative status code.
  */
 int kc_embdex_open(kc_embdex_t **out, const char *path);
 
 /**
- * Persist a newly built index as one portable binary file.
- * An opened index is read-only and cannot be saved again.
- * The current target file is overwritten and saving is not atomic.
- * @param index Index created with kc_embdex_build().
- * @param path Destination file.
- * @return KC_EMBDEX_OK or a negative status code.
- */
-int kc_embdex_save(const kc_embdex_t *index, const char *path);
-
-/**
- * Search by semantic similarity and return matching associations.
- * Omitted options default to ten results and minimum cosine score -1.
- * Results are caller-owned; ID and content strings borrow index storage.
- * Duplicate document IDs remain distinct matches.
- * @param index Index to query.
- * @param query Natural-language query string.
- * @param options Optional limit and minimum cosine similarity.
- * @param out_results Receives result array, released with kc_embdex_free().
- * @param out_count Receives number of matches.
+ * Find relevant associations using automatic retrieval.
+ * Results are delivered in descending score order. No result allocations
+ * are transferred to the caller. An omitted limit defaults to ten; a
+ * limit of zero delivers no results. The callback may stop early.
+ * @param index Opened index.
+ * @param query UTF-8 query text.
+ * @param options Optional maximum number of results.
+ * @param callback Receives borrowed results during this call.
+ * @param userdata Caller-provided context.
  * @return KC_EMBDEX_OK or a negative status code.
  */
 int kc_embdex_search(
     const kc_embdex_t *index,
     const char *query,
     const kc_embdex_search_options_t *options,
-    kc_embdex_result_t **out_results,
-    size_t *out_count
+    kc_embdex_result_fn callback,
+    void *userdata
 );
 
 /**
- * Search using the semantic, lexical, hybrid RRF, or lexical-first reranking
- * strategy. Semantic mode is equivalent to kc_embdex_search().
- * Lexical scores use BM25. Hybrid scores use reciprocal rank fusion with
- * constant 60. Rerank scores use cosine similarity over the leading BM25
- * candidates. Hybrid and rerank consider at least 100 candidates per source,
- * or the requested result limit when larger.
- * The threshold applies to cosine similarity in semantic and rerank modes
- * and to the semantic branch in hybrid mode; lexical mode ignores it.
- * Documents with repeated public IDs are joined by their private ordinal.
- * @param index Built or opened index.
- * @param query UTF-8 search query.
- * @param mode KC_EMBDEX_MODE_* search mode.
- * @param options Optional result limit and cosine threshold.
- * @param out_results Receives caller-owned results.
- * Release results with kc_embdex_free().
- * @param out_count Receives the result count.
- * @return KC_EMBDEX_OK or an error status.
- */
-int kc_embdex_search_mode(
-    const kc_embdex_t *index,
-    const char *query,
-    int mode,
-    const kc_embdex_search_options_t *options,
-    kc_embdex_result_t **out_results,
-    size_t *out_count
-);
-
-/**
- * Return the number of indexed associations, including repeated IDs.
- * @param index Index handle.
- * @return Number of indexed associations, or zero for NULL.
- */
-size_t kc_embdex_count(const kc_embdex_t *index);
-
-/**
- * Release the result array allocated by kc_embdex_search().
- * @param ptr Result array or NULL; borrowed strings are not released.
- * @return void
- */
-void kc_embdex_free(void *ptr);
-
-/**
- * Release an index and its mapped file or owned vectors.
- * @param index Index handle or NULL.
- * @return void
+ * Release an opened index and its resources.
+ * @param index Opened index handle, or NULL.
+ * @return None.
  */
 void kc_embdex_close(kc_embdex_t *index);
 
 /**
- * Return an explanatory message for a public status code.
- * @param status Status code.
- * @return Static status message.
+ * Describe a public error status.
+ * @param status Returned status code.
+ * @return Static error description.
  */
 const char *kc_embdex_strerror(int status);
 
 /**
- * Return the build timestamp generated by the build system.
- * @return Unix timestamp or zero if unspecified.
+ * Return the generated build timestamp.
+ * @return Unix timestamp, or zero if unspecified.
  */
 uint64_t kc_embdex_version(void);
 
