@@ -43,6 +43,7 @@ static const char kc_embdex_model[KC_EMBDEX_MODEL_SIZE] =
 typedef struct {
     char *source;
     char *replacement;
+    size_t insertion;
 } kc_embdex_word_t;
 
 typedef struct {
@@ -294,7 +295,64 @@ static int kc_embdex_word_compare(const void *a, const void *b)
     const kc_embdex_word_t *left = (const kc_embdex_word_t *)a;
     const kc_embdex_word_t *right = (const kc_embdex_word_t *)b;
 
-    return strcmp(left->source, right->source);
+    {
+        int order = strcmp(left->source, right->source);
+
+        if (order != 0) return order;
+        return left->insertion < right->insertion ? -1 :
+            left->insertion > right->insertion ? 1 : 0;
+    }
+}
+
+/**
+ * Find the first candidate translation by source word.
+ * Multiple dictionary lines may share a source term, in file order.
+ * @param index Loaded experimental word map.
+ * @param word BM25-normalized source term.
+ * @param count Receives number of translations available.
+ * @return Start position, or zero with count zero when absent.
+ */
+static size_t kc_embdex_word_find(const kc_embdex_t *index,
+    const char *word, size_t *count)
+{
+    size_t low = 0, high = index->word_count, first;
+
+    *count = 0;
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+
+        if (strcmp(index->wordmap[mid].source, word) < 0)
+            low = mid + 1;
+        else high = mid;
+    }
+    first = low;
+    while (low < index->word_count &&
+        strcmp(index->wordmap[low].source, word) == 0)
+    {
+        low++;
+    }
+    *count = low - first;
+    return first;
+}
+
+/**
+ * Select one substitution from a bounded set of combination candidates.
+ * The first variant always uses the first translation from the dictionary.
+ * Subsequent variants change different words on rotating mixed-radix digits,
+ * including cases where multiple words change in one sentence.
+ * @param variant Candidate combination ordinal.
+ * @param occurrence Zero-based ambiguous word occurrence.
+ * @param choices Number of possible translations for the word.
+ * @return Translation ordinal.
+ */
+static size_t kc_embdex_variant_choice(size_t variant,
+    size_t occurrence, size_t choices)
+{
+    size_t stride = (size_t)1 << (occurrence % 4);
+
+    if (variant == 0 || choices <= 1) return 0;
+    return ((variant / stride) +
+        (occurrence / 4) * (variant % choices)) % choices;
 }
 
 /**
@@ -378,6 +436,7 @@ static int kc_embdex_wordmap_load(kc_embdex_t *index)
         }
         index->wordmap[index->word_count].source = normalized;
         index->wordmap[index->word_count].replacement = replacement;
+        index->wordmap[index->word_count].insertion = index->word_count;
         index->word_count++;
     }
     if (ferror(file)) status = KC_EMBDEX_EIO;
@@ -386,11 +445,6 @@ static int kc_embdex_wordmap_load(kc_embdex_t *index)
 
     qsort(index->wordmap, index->word_count, sizeof(*index->wordmap),
         kc_embdex_word_compare);
-    for (size_t i = 1; i < index->word_count; i++) {
-        if (strcmp(index->wordmap[i-1].source,
-            index->wordmap[i].source) == 0)
-            return KC_EMBDEX_EFORMAT;
-    }
     return KC_EMBDEX_OK;
 }
 
@@ -453,9 +507,10 @@ static int kc_embdex_word_append(char **buffer, size_t *used,
  * @return KC_EMBDEX_OK or an embedding, normalization or memory error.
  */
 static int kc_embdex_embed_text(const kc_embdex_t *index,
-    const char *text, float **vector, size_t *dimension)
+    const char *text, size_t variant, float **vector, size_t *dimension)
 {
     size_t used = 0, capacity = 0, size = strlen(text), offset = 0;
+    size_t ambiguous = 0;
     char *mapped = NULL;
     int status = KC_EMBDEX_OK;
 
@@ -472,7 +527,7 @@ static int kc_embdex_embed_text(const kc_embdex_t *index,
         if (!kc_embdex_is_word_byte((unsigned char)text[offset])) {
             end++;
         } else {
-            kc_embdex_word_t key = {0}, *hit;
+            size_t first, alternatives;
 
             while (end < size &&
                 kc_embdex_is_word_byte((unsigned char)text[end]))
@@ -483,11 +538,15 @@ static int kc_embdex_embed_text(const kc_embdex_t *index,
             if (status == KC_EMBDEX_EFORMAT) status = KC_EMBDEX_OK;
             else if (status != KC_EMBDEX_OK) break;
             if (normalized != NULL) {
-                key.source = normalized;
-                hit = (kc_embdex_word_t *)bsearch(&key,
-                    index->wordmap, index->word_count,
-                    sizeof(*index->wordmap), kc_embdex_word_compare);
-                if (hit != NULL) replacement = hit->replacement;
+                first = kc_embdex_word_find(index, normalized,
+                    &alternatives);
+                if (alternatives != 0) {
+                    size_t selected = kc_embdex_variant_choice(variant,
+                        ambiguous, alternatives);
+
+                    replacement = index->wordmap[first + selected].replacement;
+                    if (alternatives > 1) ambiguous++;
+                }
             }
         }
         length = normalized == NULL || replacement == text + offset ?
@@ -685,7 +744,7 @@ static int kc_embdex_create(
         size_t length = 0;
 
         status = kc_embdex_embed_text(index, documents[i].content,
-            &index->records[i].owned_vector, &length);
+            0, &index->records[i].owned_vector, &length);
         if (status != KC_EMBDEX_OK) goto failure;
         if (length != index->dimension) {
             status = KC_EMBDEX_EEMBED;
