@@ -187,11 +187,48 @@ static int kc_test_invalid(void)
  */
 static int kc_test_format(void)
 {
+    const kc_embdex_document_t documents[] = {
+        {"record", "one indexed association"}
+    };
     const char *path = "embdex-test-corrupt.bin";
     kc_embdex_t *index = NULL;
+    unsigned char header[104];
     FILE *file;
     int failed = 0;
 
+    remove(path);
+    failed |= kc_embdex_build(path, documents, 1) != KC_EMBDEX_OK;
+    if (!failed) {
+        file = fopen(path, "rb");
+        if (file == NULL) failed = 1;
+        else {
+            failed |= fread(header, 1, sizeof(header), file) !=
+                sizeof(header);
+            failed |= fclose(file) != 0;
+            if (!failed)
+                failed |= header[8] != 3 || header[9] != 0 ||
+                    header[10] != 0 || header[11] != 0;
+        }
+    }
+    if (!failed) {
+        failed |= kc_embdex_open(&index, path) != KC_EMBDEX_OK;
+        kc_embdex_close(index);
+        index = NULL;
+    }
+    if (!failed) {
+        file = fopen(path, "r+b");
+        if (file == NULL) failed = 1;
+        else {
+            failed |= fseek(file, 8, SEEK_SET) != 0;
+            if (!failed) failed |= fputc(2, file) == EOF;
+            failed |= fclose(file) != 0;
+        }
+    }
+    if (!failed)
+        failed |= kc_embdex_open(&index, path) != KC_EMBDEX_EFORMAT;
+    failed |= index != NULL;
+    kc_embdex_close(index);
+    index = NULL;
     file = fopen(path, "wb");
     if (file == NULL) failed = 1;
     else {
@@ -204,7 +241,7 @@ static int kc_test_format(void)
     kc_embdex_close(index);
     remove(path);
     return kc_test_result("format",
-        "rejects corrupt persisted data without partial handles", failed);
+        "uses one format and rejects obsolete or corrupt indexes", failed);
 }
 
 typedef struct {
@@ -403,14 +440,14 @@ static int kc_test_wordmap(void)
     int failed = 0;
 
     remove(path);
-    file = fopen(dictionary_a, "wb");
+    file = fopen(dictionary_a, "w");
     if (file == NULL) failed = 1;
     else {
         failed |= fputs("guardar\tstore\n", file) == EOF;
         failed |= fputs("contraseñas\tpasswords\n", file) == EOF;
         failed |= fclose(file) != 0;
     }
-    file = fopen(dictionary_b, "wb");
+    file = fopen(dictionary_b, "w");
     if (file == NULL) failed = 1;
     else {
         failed |= fputs("claves\tpasswords\n", file) == EOF;
@@ -431,9 +468,25 @@ static int kc_test_wordmap(void)
             strcmp(result.first_id, "secret") != 0;
     }
     kc_embdex_close(index);
+    index = NULL;
+    if (!failed) {
+        file = fopen(path, "r+b");
+        if (file == NULL) failed = 1;
+        else {
+            long offset = 24L + (long)strlen("bge-small-en-v1.5") + 1;
+
+            failed |= fseek(file, offset, SEEK_SET) != 0;
+            if (!failed) failed |= fputc('X', file) == EOF;
+            failed |= fclose(file) != 0;
+        }
+        if (!failed)
+            failed |= kc_embdex_open(&index, path) != KC_EMBDEX_EFORMAT;
+        failed |= index != NULL;
+        kc_embdex_close(index);
+    }
     remove(path);
     return kc_test_result("wordmap",
-        "merges dictionaries and searches standalone compiled mmap maps",
+        "merges dictionaries and validates embedded map identity",
         failed);
 }
 
@@ -462,7 +515,7 @@ static int kc_test_trace_env(const char *path)
 static int kc_test_trace_embeddings(const char *path, size_t count)
 {
     char expected[64], line[8192];
-    FILE *file = fopen(path, "rb");
+    FILE *file = fopen(path, "r");
     int found = 0, failed = 0;
 
     if (file == NULL) return 1;
@@ -497,6 +550,8 @@ static int kc_test_semantic_fallback(void)
     const char *trace_path = "embdex-test-fallback.jsonl";
     kc_embdex_t *index = NULL;
     kc_test_composition_t results = {0};
+    size_t limit = 1;
+    kc_embdex_search_options_t options = { .limit = &limit };
     int failed = 0;
 
     remove(index_path);
@@ -506,25 +561,27 @@ static int kc_test_semantic_fallback(void)
         failed |= kc_embdex_open(&index, index_path) != KC_EMBDEX_OK;
     if (!failed) {
         failed |= kc_test_trace_env(trace_path) != 0;
-        if (!failed) {
-            failed |= kc_embdex_search(index, "quiero tomar agua", NULL,
+        for (size_t run = 0; run < 2 && !failed; run++) {
+            limit = run == 0 ? 1 : 10;
+            failed |= kc_embdex_search(index, "quiero tomar agua",
+                &options, kc_test_composition_receive,
+                &results) != KC_EMBDEX_OK;
+            failed |= kc_test_trace_embeddings(trace_path, 0);
+            remove(trace_path);
+            results = (kc_test_composition_t){0};
+            if (failed) break;
+            failed |= kc_embdex_search(index, "tomar", &options,
                 kc_test_composition_receive, &results) != KC_EMBDEX_OK;
             failed |= kc_test_trace_embeddings(trace_path, 0);
-        }
-        remove(trace_path);
-        results = (kc_test_composition_t){0};
-        if (!failed) {
-            failed |= kc_embdex_search(index, "tomar", NULL,
-                kc_test_composition_receive, &results) != KC_EMBDEX_OK;
-            failed |= kc_test_trace_embeddings(trace_path, 0);
-        }
-        remove(trace_path);
-        results = (kc_test_composition_t){0};
-        if (!failed) {
+            remove(trace_path);
+            results = (kc_test_composition_t){0};
+            if (failed) break;
             failed |= kc_embdex_search(index, "quiero tomar desconocido",
-                NULL, kc_test_composition_receive,
+                &options, kc_test_composition_receive,
                 &results) != KC_EMBDEX_OK;
             failed |= kc_test_trace_embeddings(trace_path, 1);
+            remove(trace_path);
+            results = (kc_test_composition_t){0};
         }
     }
     failed |= kc_test_trace_env(NULL) != 0;
