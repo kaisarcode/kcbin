@@ -48,6 +48,10 @@ resolve_project() {
         printf '%s\n' "$proj_dir/$name"
         return 0
     fi
+    if [ -f "$proj_dir/$name.c/Makefile" ]; then
+        printf '%s\n' "$proj_dir/$name.c"
+        return 0
+    fi
     if [ -f "$proj_dir/lib$name.c/Makefile" ]; then
         printf '%s\n' "$proj_dir/lib$name.c"
         return 0
@@ -66,6 +70,8 @@ capability_name() {
     if [[ "$project_name" == lib*.c ]]; then
         stem="${project_name%.c}"
         printf '%s\n' "${stem#lib}"
+    elif [[ "$project_name" == *.c ]]; then
+        printf '%s\n' "${project_name%.c}"
     else
         printf '%s\n' "$project_name"
     fi
