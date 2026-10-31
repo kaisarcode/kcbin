@@ -64,15 +64,29 @@ The callback receives borrowed results in score order. Returning nonzero
 stops delivery; no result-release operation is needed. An optional limit
 controls the maximum number delivered.
 
-The current automatic ranking combines BM25 and embedding candidates with
-reciprocal-rank fusion. Further spelling and phrase retrieval, evidence-based
-selection, and adaptive execution remain planned; the ranking should not be
-considered calibrated for all datasets.
+The retrieval strategy is automatic. embdex uses BM25's Unicode analyzer
+and indexed vocabulary for exact terms, uses libleven for bounded UTF-8
+spelling recovery, finds phrases with libngram, and also retrieves semantic
+candidates through libemb. Candidate evidence is joined by insertion ordinal.
+Query coverage, phrase completeness, spelling uncertainty, BM25 rank and
+semantic similarity influence the final ranking. Matches without sufficient
+evidence are rejected rather than returning the nearest neighbor unconditionally.
+
+Embeddings are calculated once for each query that needs them. When one
+complete phrase match already satisfies a single-result request, inference
+can be skipped. Indexes with up to 256 associations use exact cosine
+similarity and do not build HNSW; larger indexes use HNSW.
+
+The lexical analyzer folds accents, and spelling correction considers only
+words in the dataset's own vocabulary. Its edit-distance limits and the
+semantic relevance thresholds are fixed initial policies; relevance and
+false-positive rates depend on the collection and should be measured against
+representative queries. The public API does not expose search modes.
 
 ## Build
 
 Use a precompiled kclib distribution containing target-matched libemb,
-libhnsw, libbm25 and libmmap artifacts:
+libhnsw, libbm25, libmmap, libngram and libleven artifacts:
 
 ```sh
 export KCDIST_DIR="$HOME/kclib/dist"
