@@ -27,9 +27,9 @@
 #endif
 
 #ifdef __EMSCRIPTEN__
-#define KC_TEST_TOTAL 6
+#define KC_TEST_TOTAL 7
 #else
-#define KC_TEST_TOTAL 9
+#define KC_TEST_TOTAL 10
 #endif
 
 static int kc_test_current = 0;
@@ -277,6 +277,78 @@ static int kc_test_relevance(void)
         "recovers misspellings and full phrases before partial matches", failed);
 }
 
+typedef struct {
+    size_t count;
+    size_t want, drink, water, phrase;
+    double phrase_score, drink_score, water_score;
+} kc_test_composition_t;
+
+/**
+ * Record phrase and single-word association positions.
+ * @param result Borrowed ranked association.
+ * @param userdata Observed positions and scores.
+ * @return Zero to continue.
+ */
+static int kc_test_composition_receive(const kc_embdex_result_t *result,
+    void *userdata)
+{
+    kc_test_composition_t *state = (kc_test_composition_t *)userdata;
+    size_t position = ++state->count;
+
+    if (strcmp(result->id, "want") == 0) state->want = position;
+    if (strcmp(result->id, "drink") == 0) {
+        state->drink = position;
+        state->drink_score = result->score;
+    }
+    if (strcmp(result->id, "water") == 0) {
+        state->water = position;
+        state->water_score = result->score;
+    }
+    if (strcmp(result->id, "drink-water") == 0) {
+        state->phrase = position;
+        state->phrase_score = result->score;
+    }
+    return 0;
+}
+
+/**
+ * Preserve both literal segmentations and prioritize the longer n-gram.
+ * @return Zero when phrase coverage outranks separated single words.
+ */
+static int kc_test_composition(void)
+{
+    const kc_embdex_document_t documents[] = {
+        {"want", "quiero"},
+        {"drink", "tomar"},
+        {"water", "agua"},
+        {"drink-water", "tomar agua"}
+    };
+    const char *path = "embdex-test-composition.bin";
+    kc_embdex_t *index = NULL;
+    kc_test_composition_t state = {0};
+    int failed = 0;
+
+    remove(path);
+    failed |= kc_embdex_build(path, documents, 4) != KC_EMBDEX_OK;
+    if (!failed)
+        failed |= kc_embdex_open(&index, path) != KC_EMBDEX_OK;
+    if (!failed) {
+        failed |= kc_embdex_search(index, "quiero tomar agua",
+            NULL, kc_test_composition_receive, &state) != KC_EMBDEX_OK;
+        failed |= state.count != 4 || state.want == 0 ||
+            state.drink == 0 || state.water == 0 || state.phrase == 0;
+        failed |= state.phrase >= state.drink ||
+            state.phrase >= state.water;
+        failed |= state.phrase_score <= state.drink_score ||
+            state.phrase_score <= state.water_score;
+    }
+    kc_embdex_close(index);
+    remove(path);
+    return kc_test_result("composition",
+        "ranks longer literal n-grams without discarding single words",
+        failed);
+}
+
 /**
  * Validate empty queries and malformed Unicode before dispatching inference.
  * @return Zero when invalid or empty text cannot generate spurious results.
@@ -504,6 +576,7 @@ static int kc_test_run(const char *name)
     if (strcmp(name, "invalid") == 0) return kc_test_invalid();
     if (strcmp(name, "format") == 0) return kc_test_format();
     if (strcmp(name, "relevance") == 0) return kc_test_relevance();
+    if (strcmp(name, "composition") == 0) return kc_test_composition();
     if (strcmp(name, "query") == 0) return kc_test_query();
 #ifndef __EMSCRIPTEN__
     if (strcmp(name, "wordmap") == 0) return kc_test_wordmap();
@@ -524,7 +597,7 @@ int main(int argc, char **argv)
 {
     const char *cases[] = {
         "search", "duplicates", "invalid", "format",
-        "relevance", "query",
+        "relevance", "composition", "query",
 #ifndef __EMSCRIPTEN__
         "wordmap", "cli_info", "cli",
 #endif
