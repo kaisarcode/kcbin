@@ -4,7 +4,7 @@
   "author": "KaisarCode",
   "license": "LGPL-3.0-only",
   "website": "https://kaisarcode.com",
-  "repository": "https://github.com/kaisarcode/kcbin/tree/master/proj/embdex",
+  "repository": "https://github.com/kaisarcode/kcbin/tree/master/proj/embdex.c",
   "level": 1,
   "dependencies": [
     "libemb",
