@@ -124,7 +124,7 @@ wasm/wasm32:
 		TARGET_CC="$(WASM_EMCC)" TARGET_CXX="$(WASM_EMCXX)" \
 		TARGET_AR="$(WASM_EMAR)" \
 		TARGET_EXT=wasm TARGET_CFLAGS="" TARGET_SYSTEM_LIBS="-lm" \
-		TARGET_SHARED="--no-entry -sSTANDALONE_WASM=1 -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 -sEXPORTED_FUNCTIONS=_kc_embdex_build,_kc_embdex_open,_kc_embdex_save,_kc_embdex_search,_kc_embdex_search_mode,_kc_embdex_count,_kc_embdex_free,_kc_embdex_close,_kc_embdex_strerror,_kc_embdex_version"
+		TARGET_SHARED="--no-entry -sSTANDALONE_WASM=1 -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 -sEXPORTED_FUNCTIONS=_kc_embdex_build,_kc_embdex_open,_kc_embdex_search,_kc_embdex_close,_kc_embdex_strerror,_kc_embdex_version"
 
 DEP_EMB = $(KCDIST_DIR)/libemb.c/$(TARGET)
 DEP_HNSW = $(KCDIST_DIR)/libhnsw.c/$(TARGET)
