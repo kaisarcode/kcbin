@@ -96,11 +96,18 @@ rather than an artificial maximum. Approximate matches do not alter
 the document frequency of the original term, and repeated evidence
 for one query position is counted once.
 
-A complete phrase, strong multi-term lexical coverage, unusually strong
-semantic similarity, or sufficiently corroborated semantic similarity
-can justify accepting a candidate. Weak lexical coverage cannot bypass
-the query-relative semantic threshold. The relative threshold comes
-from a bounded sample of the corpus, and no search mode is exposed.
+A complete phrase, strong multi-term lexical coverage or independently
+strong semantic similarity can justify acceptance. Additionally, an
+unambiguous spelling correction supported by exact terms can qualify
+without relying on semantic inference, and a candidate close to the
+top semantic rank can qualify when corroborated by lexical evidence.
+A semantic candidate ranked far below the top cannot bypass the
+query-relative threshold merely by having a BM25 hit.
+
+For smaller indexes the semantic rank is computed from all indexed
+cosine similarities; for larger indexes it comes from HNSW's candidate
+ordering. The relative similarity threshold comes from a bounded sample
+of the corpus, and no search mode is exposed.
 
 For a single requested result, a complete normalized phrase match can
 avoid model inference. Queries with insufficient evidence can return
@@ -123,7 +130,7 @@ KC_EMBDEX_TRACE=/tmp/embdex-trace.jsonl \
 ```
 
 The opt-in trace includes corpus ordinals, IDs, original content,
-bitmasks of lexical and phrase matches, BM25 ranks, measured cosine
+bitmasks of lexical and phrase matches, BM25 and semantic ranks, measured cosine
 similarities, weighted coverage, acceptance reasons, scores and ranks
 before result-limit truncation. It is intended for benchmarks, not
 production logging: it includes source text and queries, and is appended
