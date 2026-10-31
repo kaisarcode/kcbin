@@ -2093,13 +2093,15 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                             item->semantic_variant = variant;
                         }
                     }
-                    qsort(ranks, index->count, sizeof(*ranks),
-                        kc_embdex_rank_compare);
-                    for (size_t i = 0; i < index->count; i++) {
-                        size_t ordinal = ranks[i].ordinal;
+                    if (variants > 1) {
+                        qsort(ranks, index->count, sizeof(*ranks),
+                            kc_embdex_rank_compare);
+                        for (size_t i = 0; i < index->count; i++) {
+                            size_t ordinal = ranks[i].ordinal;
 
-                        evidence[ordinal].fusion_sum +=
-                            2.0 / (2.0 + (double)i);
+                            evidence[ordinal].fusion_sum +=
+                                2.0 / (2.0 + (double)i);
+                        }
                     }
                 } else {
                     int result = kc_hnsw_search(index->graph,
@@ -2142,13 +2144,15 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                             item->semantic_variant = variant;
                         }
                     }
-                    qsort(ranks, semantic_count, sizeof(*ranks),
-                        kc_embdex_rank_compare);
-                    for (size_t i = 0; i < semantic_count; i++) {
-                        size_t ordinal = ranks[i].ordinal;
+                    if (variants > 1) {
+                        qsort(ranks, semantic_count, sizeof(*ranks),
+                            kc_embdex_rank_compare);
+                        for (size_t i = 0; i < semantic_count; i++) {
+                            size_t ordinal = ranks[i].ordinal;
 
-                        evidence[ordinal].fusion_sum +=
-                            2.0 / (2.0 + (double)i);
+                            evidence[ordinal].fusion_sum +=
+                                2.0 / (2.0 + (double)i);
+                        }
                     }
                     kc_hnsw_free(semantic);
                     semantic = NULL;
