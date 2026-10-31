@@ -1475,6 +1475,10 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                     status = KC_EMBDEX_EINDEX;
                     goto finished;
                 }
+                if (semantic_count > index->count) {
+                    status = KC_EMBDEX_EINDEX;
+                    goto finished;
+                }
                 for (size_t i = 0; i < semantic_count; i++) {
                     char *end;
                     uintmax_t ordinal = strtoumax(semantic[i].id, &end, 10);
@@ -1488,8 +1492,13 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                     evidence[(size_t)ordinal].semantic = semantic[i].score;
                     evidence[(size_t)ordinal].semantic_measured = 1;
                     evidence[(size_t)ordinal].semantic_found = 1;
-                    evidence[(size_t)ordinal].semantic_rank = i + 1;
+                    ranks[i].ordinal = (size_t)ordinal;
+                    ranks[i].score = semantic[i].score;
                 }
+                qsort(ranks, semantic_count, sizeof(*ranks),
+                    kc_embdex_rank_compare);
+                for (size_t i = 0; i < semantic_count; i++)
+                    evidence[ranks[i].ordinal].semantic_rank = i + 1;
             }
         }
     }
