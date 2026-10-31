@@ -32,8 +32,10 @@ index uses version 2 and a 104-byte header:
 Version 2 contains contiguous sections in order: associations and vectors,
 original BM25, normalized BM25, and dictionary. The dictionary starts
 with its 32-bit entry count and uses 32-bit byte lengths followed by
-NUL-terminated normalized-source/English-replacement word pairs.
-Repeated source words retain their ordered translation alternatives.
+NUL-terminated source/replacement word pairs. Repeated source words
+retain the ordered alternatives supplied by all input dictionaries,
+with exact duplicate pairs discarded. Neither source nor replacement
+is labeled with a language.
 
 Each association stores its ID and content lengths as 32-bit values,
 NUL-terminated ID and content strings, and a vector of single-precision
@@ -43,8 +45,9 @@ the internal identity for every retrieval mechanism.
 Each BM25 section contains analyzer configuration, normalized terms,
 document statistics, and postings. The source and translated BM25 indexes
 share association ordinals but remain independent. They use accent folding.
-The dictionary embedded in version 2 is loaded into a compact lookup table
-when the map is opened; no source TSV file is needed.
+The merged dictionary embedded in version 2 is loaded into a compact
+lookup table when the map is opened; none of the original TSV files
+are needed.
 
 Loaded indexes validate section boundaries, association counts, vector
 dimensions and dictionary structure. Version 1 remains readable for
