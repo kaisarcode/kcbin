@@ -33,6 +33,7 @@ opening it allows repeated searches.
 
 ```c
 #include "libembdex.h"
+#include <stdio.h>
 
 static int visit(const kc_embdex_result_t *result, void *userdata)
 {
@@ -41,20 +42,24 @@ static int visit(const kc_embdex_result_t *result, void *userdata)
     return 0;
 }
 
-kc_embdex_document_t corpus[] = {
-    {"document", "Authentication between peers"},
-    {"document", "Exchanging public keys"}
-};
+int main(void)
+{
+    const kc_embdex_document_t corpus[] = {
+        {"document", "Authentication between peers"},
+        {"document", "Exchanging public keys"}
+    };
+    kc_embdex_t *index = NULL;
+    int status = kc_embdex_build("corpus.bin", corpus, 2);
 
-kc_embdex_build("corpus.bin", corpus, 2);
-
-kc_embdex_t *index = NULL;
-if (kc_embdex_open(&index, "corpus.bin") == KC_EMBDEX_OK) {
-    kc_embdex_search(index, "secure connections", NULL, visit, NULL);
+    if (status != KC_EMBDEX_OK) return 1;
+    status = kc_embdex_open(&index, "corpus.bin");
+    if (status == KC_EMBDEX_OK)
+        status = kc_embdex_search(index, "secure connections",
+            NULL, visit, NULL);
     kc_embdex_close(index);
+    return status == KC_EMBDEX_OK ? 0 : 1;
 }
 ```
-
 The callback receives borrowed results in score order. Returning nonzero
 stops delivery; no result-release operation is needed. An optional limit
 controls the maximum number delivered.
