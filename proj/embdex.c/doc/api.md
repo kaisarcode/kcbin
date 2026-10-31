@@ -166,12 +166,18 @@ KC_EMBDEX_WORDMAP=wordmap-es-en.tsv \
 ```
 
 The corpus embeddings use the **first** English translation for each word.
-Queries can test up to 16 deterministic mixed-radix word combinations.
-The actual number is bounded by the available translations and the
-configured budget. Identical pseudo-English strings are recognized
-before inference and embedded once. Every distinct result is evaluated
-against the corpus, and the highest cosine per association remains the
-experimental acceptance and ranking input.
+Queries can test up to 16 deterministic combinations. When all possible
+combinations fit the budget, the engine enumerates them using mixed-radix
+indexes. Otherwise it uses staggered substitutions across the entire
+sentence, so alternatives near the end are not excluded merely because
+earlier words have several translations. Multiple words may change in
+the same candidate.
+
+Identical pseudo-English strings are recognized before inference and
+embedded once. Every distinct result is evaluated against the corpus;
+the highest cosine per association remains the experimental acceptance
+and ranking input. No grammatical correction or translation-ranking
+model is introduced.
 
 When `KC_EMBDEX_TRACE` is enabled, `variant_scores` records one cosine
 per distinct candidate text for each association. `variants_requested`
