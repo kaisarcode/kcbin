@@ -41,6 +41,11 @@ static const char kc_embdex_model[KC_EMBDEX_MODEL_SIZE] =
     "bge-small-en-v1.5";
 
 typedef struct {
+    char *source;
+    char *replacement;
+} kc_embdex_word_t;
+
+typedef struct {
     const char *id;
     const char *content;
     const unsigned char *encoded;
@@ -57,6 +62,9 @@ struct kc_embdex {
     kc_mmap_t *mapping;
     size_t lexical_offset;
     size_t lexical_size;
+    kc_embdex_word_t *wordmap;
+    size_t word_count;
+    char model_tag[KC_EMBDEX_MODEL_SIZE];
 };
 
 /**
@@ -386,7 +394,7 @@ static int kc_embdex_load_records(kc_embdex_t *index)
     data = (const unsigned char *)bytes;
     if (memcmp(data, kc_embdex_magic, 8) != 0 ||
         kc_embdex_read_u32(data + 8) != KC_EMBDEX_FORMAT_VERSION ||
-        memcmp(data + 24, kc_embdex_model, KC_EMBDEX_MODEL_SIZE) != 0)
+        memcmp(data + 24, index->model_tag, KC_EMBDEX_MODEL_SIZE) != 0)
         return KC_EMBDEX_EFORMAT;
     {
         uint64_t lexical_offset = kc_embdex_read_u64(data + 56);
@@ -601,7 +609,7 @@ static int kc_embdex_save(const kc_embdex_t *index, const char *path)
     kc_embdex_write_u32(data + 8, KC_EMBDEX_FORMAT_VERSION);
     kc_embdex_write_u32(data + 12, (uint32_t)index->dimension);
     kc_embdex_write_u64(data + 16, (uint64_t)index->count);
-    memcpy(data + 24, kc_embdex_model, KC_EMBDEX_MODEL_SIZE);
+    memcpy(data + 24, index->model_tag, KC_EMBDEX_MODEL_SIZE);
     kc_embdex_write_u64(data + 56, (uint64_t)record_size);
     kc_embdex_write_u64(data + 64, (uint64_t)lexical_size);
 
@@ -1596,6 +1604,11 @@ void kc_embdex_close(kc_embdex_t *index)
         }
     }
     free(index->records);
+    for (size_t i = 0; i < index->word_count; i++) {
+        free(index->wordmap[i].source);
+        free(index->wordmap[i].replacement);
+    }
+    free(index->wordmap);
     kc_mmap_close(index->mapping);
     free(index);
 }
