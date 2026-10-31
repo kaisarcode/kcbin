@@ -1169,6 +1169,8 @@ typedef struct {
     size_t longest;
     size_t lexical_rank;
     double semantic;
+    double fusion_sum;
+    double fusion_rrf;
     int semantic_found;
     int semantic_measured;
     size_t semantic_rank;
@@ -1674,11 +1676,11 @@ static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
         else fputs("null", file);
         fprintf(file, ",\"semantic_rank\":%zu,\"variant\":%zu,"
             "\"variants_evaluated\":%zu,\"variants_requested\":%zu,"
-            "\"candidate_threshold\":%.9g,\"final_rank\":%zu,"
-            "\"variant_scores\":[",
+            "\"candidate_threshold\":%.9g,\"fusion_rrf\":%.9g,"
+            "\"final_rank\":%zu,\"variant_scores\":[",
             item->semantic_rank, item->semantic_variant,
             item->variants_evaluated, requested_variants,
-            item->semantic_threshold, item->final_rank);
+            item->semantic_threshold, item->fusion_rrf, item->final_rank);
         for (size_t k = 0; k < variant_count; k++) {
             double cosine = variant_scores == NULL ? NAN :
                 variant_scores[i * variant_stride + k];
@@ -2089,6 +2091,21 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                             item->semantic_variant = variant;
                         }
                     }
+                    for (size_t i = 0; i < index->count; i++) {
+                        ranks[i].ordinal = i;
+                        ranks[i].score = evidence[i].semantic_measured &&
+                            evidence[i].semantic_variant == variant ?
+                            evidence[i].semantic : 
+                            kc_embdex_cosine(index, i, embedding);
+                    }
+                    qsort(ranks, index->count, sizeof(*ranks),
+                        kc_embdex_rank_compare);
+                    for (size_t i = 0; i < index->count; i++) {
+                        size_t ordinal = ranks[i].ordinal;
+
+                        evidence[ordinal].fusion_sum +=
+                            2.0 / (2.0 + (double)i);
+                    }
                 } else {
                     int result = kc_hnsw_search(index->graph,
                         embedding, window, semantic_floor,
@@ -2128,6 +2145,12 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                             item->semantic_variant = variant;
                         }
                     }
+                    for (size_t i = 0; i < semantic_count; i++) {
+                        size_t ordinal = ranks[i].ordinal;
+
+                        evidence[ordinal].fusion_sum +=
+                            2.0 / (2.0 + (double)i);
+                    }
                     kc_hnsw_free(semantic);
                     semantic = NULL;
                 }
@@ -2141,6 +2164,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
 
                 for (size_t i = 0; i < index->count; i++) {
                     evidence[i].variants_evaluated = unique_variants;
+                    evidence[i].fusion_rrf = unique_variants > 0 ?
+                        evidence[i].fusion_sum / (double)unique_variants : 0;
                     if (!evidence[i].semantic_measured) continue;
                     ranks[candidates].ordinal = i;
                     ranks[candidates++].score = evidence[i].semantic;
@@ -2190,6 +2215,11 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         score = kc_embdex_score(item, coverage, precise,
             total_weight > 0 ? weight_corrected / total_weight : 0,
             phrase);
+        /* For several query translations, preserve lexical evidence and
+         * combine the maximum cosine with cross-variant ranking agreement.
+         * No additional embeddings or external model are needed. */
+        if (unique_variants > 1 && item->semantic_found)
+            score += 0.20 * (item->fusion_rrf - item->semantic);
         item->score = score;
         ranks[rank_count].ordinal = i;
         ranks[rank_count++].score = score;
