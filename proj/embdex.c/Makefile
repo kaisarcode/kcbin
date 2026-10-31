@@ -221,6 +221,8 @@ test:
 			"$(KCDIST_DIR)/libhnsw.c/wasm/wasm32/libhnsw.a" \
 			"$(KCDIST_DIR)/libbm25.c/wasm/wasm32/libbm25.a" \
 			"$(KCDIST_DIR)/libmmap.c/wasm/wasm32/libmmap.a" \
+			"$(KCDIST_DIR)/libngram.c/wasm/wasm32/libngram.a" \
+			"$(KCDIST_DIR)/libleven.c/wasm/wasm32/libleven.a" \
 			-lm -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 || exit 1; \
 		(cd "$(BUILD_DIR)/test-wasm" && "$$node" embdex-test.js all); \
 	elif [ -n "$(filter wine,$(MAKECMDGOALS))" ]; then \
