@@ -1021,6 +1021,77 @@ static int kc_embdex_load_records(kc_embdex_t *index)
 }
 
 /**
+ * Restore the normalized dictionary from the mapped binary index.
+ * The on-disk section is a 32-bit count followed by word lengths and
+ * NUL-terminated source/replacement pairs. Copies are owned by the index.
+ * @param index Index with a valid mapping and section bounds.
+ * @return KC_EMBDEX_OK or EFORMAT / ENOMEM.
+ */
+static int kc_embdex_load_wordmap(kc_embdex_t *index)
+{
+    const void *bytes = NULL;
+    const unsigned char *data;
+    size_t size, offset, end;
+    uint32_t count;
+
+    if (kc_mmap_get(index->mapping, &bytes, &size) != KC_MMAP_OK ||
+        !kc_embdex_fits(size, index->wordmap_offset,
+            index->wordmap_size))
+        return KC_EMBDEX_EFORMAT;
+    data = (const unsigned char *)bytes;
+    offset = index->wordmap_offset;
+    end = offset + index->wordmap_size;
+    if (!kc_embdex_fits(end, offset, 4))
+        return KC_EMBDEX_EFORMAT;
+    count = kc_embdex_read_u32(data + offset);
+    offset += 4;
+    if (count == 0 || count > 4096 ||
+        count > SIZE_MAX / sizeof(*index->wordmap))
+        return KC_EMBDEX_EFORMAT;
+    index->wordmap = (kc_embdex_word_t *)calloc(count,
+        sizeof(*index->wordmap));
+    if (index->wordmap == NULL) return KC_EMBDEX_ENOMEM;
+    for (uint32_t i = 0; i < count; i++) {
+        size_t source_length, replacement_length;
+        char *source, *replacement;
+
+        if (!kc_embdex_fits(end, offset, 8))
+            return KC_EMBDEX_EFORMAT;
+        source_length = kc_embdex_read_u32(data + offset);
+        replacement_length = kc_embdex_read_u32(data + offset + 4);
+        offset += 8;
+        if (source_length == 0 || replacement_length == 0 ||
+            !kc_embdex_fits(end, offset, source_length + 1) ||
+            data[offset + source_length] != '\0' ||
+            memchr(data + offset, '\0', source_length) != NULL)
+            return KC_EMBDEX_EFORMAT;
+        source = kc_embdex_copy_string((const char *)data + offset);
+        if (source == NULL) return KC_EMBDEX_ENOMEM;
+        offset += source_length + 1;
+        if (!kc_embdex_fits(end, offset, replacement_length + 1) ||
+            data[offset + replacement_length] != '\0' ||
+            memchr(data + offset, '\0', replacement_length) != NULL)
+        {
+            free(source);
+            return KC_EMBDEX_EFORMAT;
+        }
+        replacement = kc_embdex_copy_string((const char *)data + offset);
+        if (replacement == NULL) {
+            free(source);
+            return KC_EMBDEX_ENOMEM;
+        }
+        offset += replacement_length + 1;
+        index->wordmap[i].source = source;
+        index->wordmap[i].replacement = replacement;
+        index->wordmap[i].insertion = i;
+        index->word_count++;
+        if (i != 0 && strcmp(index->wordmap[i-1].source, source) > 0)
+            return KC_EMBDEX_EFORMAT;
+    }
+    return offset == end ? KC_EMBDEX_OK : KC_EMBDEX_EFORMAT;
+}
+
+/**
  * Open a binary semantic index and reconstruct its in-memory graph.
  * @param out Receives the opened index.
  * @param path Index file path.
@@ -1042,14 +1113,30 @@ int kc_embdex_open(kc_embdex_t **out, const char *path)
     if (index == NULL) {
         return KC_EMBDEX_ENOMEM;
     }
-    status = kc_embdex_model_identity(index->model_tag);
-    if (status != KC_EMBDEX_OK) {
-        kc_embdex_close(index);
-        return status;
-    }
     if (kc_mmap_open(&index->mapping, path) != KC_MMAP_OK) {
         kc_embdex_close(index);
         return KC_EMBDEX_EIO;
+    }
+    {
+        const void *header = NULL;
+        size_t size = 0;
+        uint32_t version;
+
+        if (kc_mmap_get(index->mapping, &header, &size) != KC_MMAP_OK ||
+            size < KC_EMBDEX_HEADER_SIZE) {
+            kc_embdex_close(index);
+            return KC_EMBDEX_EFORMAT;
+        }
+        version = kc_embdex_read_u32((const unsigned char *)header + 8);
+        /* Old indexes may still depend on an external wordmap.
+         * New mapped indexes are completely self-contained. */
+        if (version == KC_EMBDEX_FORMAT_VERSION) {
+            status = kc_embdex_model_identity(index->model_tag);
+            if (status != KC_EMBDEX_OK) {
+                kc_embdex_close(index);
+                return status;
+            }
+        }
     }
     status = kc_embdex_load_records(index);
     if (status == KC_EMBDEX_OK) {
@@ -1071,8 +1158,27 @@ int kc_embdex_open(kc_embdex_t **out, const char *path)
         else if (kc_bm25_count(index->lexical) != index->count)
             status = KC_EMBDEX_EFORMAT;
     }
-    if (status == KC_EMBDEX_OK)
+    if (status == KC_EMBDEX_OK &&
+        index->format_version == KC_EMBDEX_MAPPED_FORMAT_VERSION)
+    {
+        const void *bytes = NULL;
+        size_t size = 0;
+        int result = KC_BM25_EFORMAT;
+
+        if (kc_mmap_get(index->mapping, &bytes, &size) == KC_MMAP_OK)
+            result = kc_bm25_import(&index->mapped_lexical,
+                (const unsigned char *)bytes + index->mapped_lexical_offset,
+                index->mapped_lexical_size);
+        if (result != KC_BM25_OK)
+            status = result == KC_BM25_ENOMEM ?
+                KC_EMBDEX_ENOMEM : KC_EMBDEX_EFORMAT;
+        else if (kc_bm25_count(index->mapped_lexical) != index->count)
+            status = KC_EMBDEX_EFORMAT;
+        if (status == KC_EMBDEX_OK)
+            status = kc_embdex_load_wordmap(index);
+    } else if (status == KC_EMBDEX_OK) {
         status = kc_embdex_wordmap_load(index);
+    }
     if (status == KC_EMBDEX_OK && index->count > KC_EMBDEX_EXACT_LIMIT)
         status = kc_embdex_prepare_graph(index);
     if (status != KC_EMBDEX_OK) {
