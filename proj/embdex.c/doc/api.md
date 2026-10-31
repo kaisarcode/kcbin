@@ -206,12 +206,19 @@ The C API also accepts explicit dictionary inputs:
 ```c
 const char *dictionaries[] = {"spanish.tsv", "rioplatense.tsv"};
 int status = kc_embdex_build_with_dictionaries(
-    "mapa.bin", documents, document_count, dictionaries, 2);
+    "mapa.bin", documents, document_count, dictionaries, 2, NULL);
 ```
 
 The `kc_embdex_build()` operation builds maps without dictionary
 substitutions. Dictionaries are supplied only at build time; search
 needs only the compiled map.
+
+The final argument to `kc_embdex_build_with_dictionaries()` is an optional
+`kc_embdex_build_options_t`. Its progress callback reports preparation,
+embedding, saving and completion in that order. During embedding,
+`completed` advances from zero to the total number of associations.
+Other stages supply zero counters. Callbacks run synchronously and cannot
+cancel a build; a NULL option disables notifications.
 
 This is literal substitution rather than sentence translation. Unmatched
 words are preserved. Queries can test up to eight deterministic combinations
@@ -240,9 +247,13 @@ or a file. Optional `-d` / `--dictionary` flags are repeatable and
 provide independent dictionary files in priority order:
 
 ```sh
-embdex build corpus.bin -i documents.tsv
+embdex build corpus.bin -i documents.tsv --progress
 printf 'doc-1\tAuthentication between peers\n' | embdex build corpus.bin
 ```
+
+`-p` / `--progress` is optional for `build`. It reports preparation,
+embedding progress every 10%, saving and completion to standard error.
+The normal build prints no progress, and search accepts neither flag.
 
 The first tab separates ID from content. Blank lines are ignored;
 nonblank lines must contain nonempty ID and content. Embedded tabs,
