@@ -45,6 +45,38 @@ typedef struct {
 } kc_embdex_search_options_t;
 
 /**
+ * Identify the current phase of a build.
+ */
+typedef enum {
+    KC_EMBDEX_BUILD_PREPARE,
+    KC_EMBDEX_BUILD_EMBED,
+    KC_EMBDEX_BUILD_SAVE,
+    KC_EMBDEX_BUILD_DONE
+} kc_embdex_build_stage_t;
+
+/**
+ * Observe build phases without changing build results.
+ * The embedding phase reports completed associations and their total.
+ * Other phases report zero for both counters. Callback data is borrowed.
+ * @param stage Current build phase.
+ * @param completed Number of associations already embedded.
+ * @param total Total associations requiring an embedding.
+ * @param userdata Caller-owned context.
+ * @return None.
+ */
+typedef void (*kc_embdex_progress_fn)(
+    kc_embdex_build_stage_t stage,
+    size_t completed,
+    size_t total,
+    void *userdata
+);
+
+typedef struct {
+    kc_embdex_progress_fn progress;
+    void *userdata;
+} kc_embdex_build_options_t;
+
+/**
  * Visit one relevant association. The result and its strings are borrowed
  * for the duration of the callback. A nonzero return stops delivery without
  * signaling a search failure.
@@ -87,6 +119,7 @@ int kc_embdex_build(
  * @param count Number of associations.
  * @param dictionaries Array of dictionary file paths, or NULL when empty.
  * @param dictionary_count Number of dictionary files.
+ * @param options Optional progress callback; NULL disables notifications.
  * @return KC_EMBDEX_OK or a negative status.
  */
 int kc_embdex_build_with_dictionaries(
@@ -94,7 +127,8 @@ int kc_embdex_build_with_dictionaries(
     const kc_embdex_document_t *documents,
     size_t count,
     const char *const *dictionaries,
-    size_t dictionary_count
+    size_t dictionary_count,
+    const kc_embdex_build_options_t *options
 );
 
 /**
