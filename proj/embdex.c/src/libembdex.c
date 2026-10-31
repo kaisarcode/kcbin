@@ -12,6 +12,8 @@
 #include "libbm25.h"
 #include "libhnsw.h"
 #include "libmmap.h"
+#include "libngram.h"
+#include "libleven.h"
 
 #include <inttypes.h>
 #include <limits.h>
@@ -27,6 +29,9 @@
 
 #define KC_EMBDEX_HEADER_SIZE 68U
 #define KC_EMBDEX_MODEL_SIZE 32U
+#define KC_EMBDEX_EXACT_LIMIT 256U
+#define KC_EMBDEX_QUERY_TOKENS 64U
+#define KC_EMBDEX_FUZZY_CHOICES 8U
 
 static const unsigned char kc_embdex_magic[8] = {
     'K', 'C', 'S', 'I', 'D', 'X', '\r', '\n'
@@ -264,7 +269,9 @@ finished:
  */
 static int kc_embdex_prepare_lexical(kc_embdex_t *index)
 {
-    int status = kc_bm25_open(&index->lexical, NULL);
+    int fold_accents = 1;
+    kc_bm25_options_t options = { .fold_accents = &fold_accents };
+    int status = kc_bm25_open(&index->lexical, &options);
 
     if (status != KC_BM25_OK) {
         return status == KC_BM25_ENOMEM ? KC_EMBDEX_ENOMEM : KC_EMBDEX_ELEXICAL;
@@ -345,10 +352,6 @@ static int kc_embdex_create(
         ) != KC_EMB_OK || length != index->dimension) {
             goto failure;
         }
-    }
-    status = kc_embdex_prepare_graph(index);
-    if (status != KC_EMBDEX_OK) {
-        goto failure;
     }
     status = kc_embdex_prepare_lexical(index);
     if (status != KC_EMBDEX_OK) {
@@ -472,9 +475,8 @@ int kc_embdex_open(kc_embdex_t **out, const char *path)
         return KC_EMBDEX_EIO;
     }
     status = kc_embdex_load_records(index);
-    if (status == KC_EMBDEX_OK) {
+    if (status == KC_EMBDEX_OK && index->count > KC_EMBDEX_EXACT_LIMIT)
         status = kc_embdex_prepare_graph(index);
-    }
     if (status == KC_EMBDEX_OK) {
         const void *mapped = NULL;
         size_t mapped_size = 0;
@@ -660,15 +662,346 @@ int kc_embdex_build(const char *path,
 }
 
 typedef struct {
+    char *value[KC_EMBDEX_QUERY_TOKENS];
+    size_t count;
+    int failed;
+} kc_embdex_tokens_t;
+
+typedef struct {
+    uint64_t exact;
+    uint64_t fuzzy;
+    uint64_t phrase;
+    size_t longest;
+    size_t lexical_rank;
+    double semantic;
+    int semantic_found;
+    int full_phrase;
+} kc_embdex_evidence_t;
+
+typedef struct {
     size_t ordinal;
     double score;
 } kc_embdex_rank_t;
 
+typedef struct {
+    kc_embdex_evidence_t *evidence;
+    size_t count;
+    size_t position;
+    int fuzzy;
+    int failed;
+    size_t found;
+} kc_embdex_post_context_t;
+
+typedef struct {
+    const char *word;
+    size_t length;
+    size_t maximum;
+    size_t best;
+    const char *choices[KC_EMBDEX_FUZZY_CHOICES];
+    size_t count;
+    int ambiguous;
+    int failed;
+} kc_embdex_fuzzy_context_t;
+
+typedef struct {
+    const char *document;
+    kc_embdex_evidence_t *evidence;
+} kc_embdex_phrase_context_t;
+
 /**
- * Compare candidates by descending score and insertion order.
+ * Keep the first bounded set of normalized query words in owned storage.
+ * @param word Borrowed normalized word.
+ * @param userdata Query token accumulator.
+ * @return Zero to continue, nonzero when the bound or memory is exhausted.
+ */
+static int kc_embdex_token_add(const char *word, void *userdata)
+{
+    kc_embdex_tokens_t *tokens = (kc_embdex_tokens_t *)userdata;
+    size_t size;
+    char *copy;
+
+    if (tokens->count >= KC_EMBDEX_QUERY_TOKENS) return 1;
+    size = strlen(word);
+    if (size == SIZE_MAX) {
+        tokens->failed = 1;
+        return 1;
+    }
+    copy = (char *)malloc(size + 1);
+    if (copy == NULL) {
+        tokens->failed = 1;
+        return 1;
+    }
+    memcpy(copy, word, size + 1);
+    tokens->value[tokens->count++] = copy;
+    return 0;
+}
+
+/**
+ * Release normalized query word storage.
+ * @param tokens Owned query token collection.
+ * @return None.
+ */
+static void kc_embdex_tokens_close(kc_embdex_tokens_t *tokens)
+{
+    for (size_t i = 0; i < tokens->count; i++)
+        free(tokens->value[i]);
+    tokens->count = 0;
+}
+
+/**
+ * Join normalized query words using unambiguous ASCII word separators.
+ * @param tokens Normalized query tokens.
+ * @return Owned joined string, or NULL when allocation fails.
+ */
+static char *kc_embdex_join(const kc_embdex_tokens_t *tokens)
+{
+    size_t size = 1, offset = 0;
+    char *joined;
+
+    for (size_t i = 0; i < tokens->count; i++) {
+        size_t length = strlen(tokens->value[i]);
+
+        if (length > SIZE_MAX - size - 1) return NULL;
+        size += length + 1;
+    }
+    joined = (char *)malloc(size);
+    if (joined == NULL) return NULL;
+    for (size_t i = 0; i < tokens->count; i++) {
+        size_t length = strlen(tokens->value[i]);
+
+        if (i > 0) joined[offset++] = ' ';
+        memcpy(joined + offset, tokens->value[i], length);
+        offset += length;
+    }
+    joined[offset] = '\0';
+    return joined;
+}
+
+typedef struct {
+    char *text;
+    size_t used;
+    size_t capacity;
+    int failed;
+} kc_embdex_text_t;
+
+/**
+ * Append one normalized term to a bounded dynamically allocated string.
+ * @param word Borrowed normalized word.
+ * @param userdata String accumulator.
+ * @return Zero on success and nonzero on allocation failure.
+ */
+static int kc_embdex_text_append(const char *word, void *userdata)
+{
+    kc_embdex_text_t *text = (kc_embdex_text_t *)userdata;
+    size_t length = strlen(word), required;
+    char *next;
+
+    if (length > SIZE_MAX - text->used - 2) {
+        text->failed = 1;
+        return 1;
+    }
+    required = text->used + length + 2;
+    if (required > text->capacity) {
+        size_t capacity = text->capacity == 0 ? 64 : text->capacity;
+
+        while (capacity < required) {
+            if (capacity > SIZE_MAX / 2) {
+                text->failed = 1;
+                return 1;
+            }
+            capacity *= 2;
+        }
+        next = (char *)realloc(text->text, capacity);
+        if (next == NULL) {
+            text->failed = 1;
+            return 1;
+        }
+        text->text = next;
+        text->capacity = capacity;
+    }
+    if (text->used > 0) text->text[text->used++] = ' ';
+    memcpy(text->text + text->used, word, length);
+    text->used += length;
+    text->text[text->used] = '\0';
+    return 0;
+}
+
+/**
+ * Count Unicode scalar values in an already validated normalized token.
+ * @param word BM25-normalized UTF-8 word.
+ * @return Number of Unicode scalar values.
+ */
+static size_t kc_embdex_length(const char *word)
+{
+    size_t length = 0;
+
+    for (const unsigned char *p = (const unsigned char *)word; *p; p++)
+        if ((*p & 0xc0U) != 0x80U) length++;
+    return length;
+}
+
+/**
+ * Record document matches for one normalized exact or corrected term.
+ * @param ordinal Matching document ordinal.
+ * @param frequency Term frequency, unused for coverage.
+ * @param userdata Current query-word evidence context.
+ * @return Zero on success, nonzero when ordinal is invalid.
+ */
+static int kc_embdex_posting_add(size_t ordinal, size_t frequency,
+    void *userdata)
+{
+    kc_embdex_post_context_t *context =
+        (kc_embdex_post_context_t *)userdata;
+    kc_embdex_evidence_t *evidence;
+
+    (void)frequency;
+    if (ordinal >= context->count) {
+        context->failed = 1;
+        return 1;
+    }
+    evidence = &context->evidence[ordinal];
+    if (context->fuzzy)
+        evidence->fuzzy |= UINT64_C(1) << context->position;
+    else
+        evidence->exact |= UINT64_C(1) << context->position;
+    context->found++;
+    return 0;
+}
+
+/**
+ * Retain nearest spelling alternatives in the actual indexed vocabulary.
+ * @param term Normalized vocabulary term.
+ * @param document_count Number of matching associations, unused.
+ * @param userdata Fuzzy candidate collector.
+ * @return Zero to keep scanning, nonzero on an internal error.
+ */
+static int kc_embdex_fuzzy_visit(const char *term, size_t document_count,
+    void *userdata)
+{
+    kc_embdex_fuzzy_context_t *context =
+        (kc_embdex_fuzzy_context_t *)userdata;
+    size_t length = kc_embdex_length(term), distance = 0;
+    int status;
+
+    (void)document_count;
+    if (length > context->length + context->maximum ||
+        context->length > length + context->maximum)
+        return 0;
+    status = kc_leven_distance(context->word, term, &context->maximum,
+        &distance);
+    if (status == KC_LEVEN_ELIMIT) return 0;
+    if (status != KC_LEVEN_OK) {
+        context->failed = 1;
+        return 1;
+    }
+    if (distance == 0 || distance > context->best) return 0;
+    if (distance < context->best) {
+        context->best = distance;
+        context->count = 0;
+        context->ambiguous = 0;
+    }
+    if (context->count < KC_EMBDEX_FUZZY_CHOICES)
+        context->choices[context->count++] = term;
+    else context->ambiguous = 1;
+    return 0;
+}
+
+/**
+ * Determine whether a normalized document contains a complete word span.
+ * @param document Space-separated normalized document.
+ * @param phrase Text bytes for a normalized word sequence.
+ * @param length Exact byte length of the phrase.
+ * @return One on a whole-token phrase match, otherwise zero.
+ */
+static int kc_embdex_contains(const char *document,
+    const char *phrase, size_t length)
+{
+    for (const char *p = document; *p; p++) {
+        if (p != document && p[-1] != ' ') continue;
+        if (strncmp(p, phrase, length) == 0 &&
+            (p[length] == '\0' || p[length] == ' '))
+            return 1;
+    }
+    return 0;
+}
+
+/**
+ * Measure matching query windows without counting overlapping tokens twice.
+ * @param chunk Current n-gram window in the normalized query.
+ * @param userdata Candidate document and its evidence.
+ * @return Zero to continue traversing.
+ */
+static int kc_embdex_phrase_visit(const kc_ngram_chunk_t *chunk,
+    void *userdata)
+{
+    kc_embdex_phrase_context_t *context =
+        (kc_embdex_phrase_context_t *)userdata;
+
+    if (kc_embdex_contains(context->document,
+        chunk->data, chunk->data_size))
+    {
+        for (size_t j = 0; j < chunk->token_count; j++)
+            context->evidence->phrase |=
+                UINT64_C(1) << (chunk->token_start + j);
+        if (chunk->token_count > context->evidence->longest)
+            context->evidence->longest = chunk->token_count;
+    }
+    return 0;
+}
+
+/**
+ * Count recognized query positions without double-counting window overlaps.
+ * @param bits Query-position coverage bitmap.
+ * @return Number of distinct covered positions.
+ */
+static size_t kc_embdex_popcount(uint64_t bits)
+{
+    size_t count = 0;
+
+    while (bits != 0) {
+        bits &= bits - 1;
+        count++;
+    }
+    return count;
+}
+
+/**
+ * Compute normalized cosine similarity against one persisted document vector.
+ * @param index Opened index.
+ * @param ordinal Document ordinal.
+ * @param query Query embedding.
+ * @return Similarity in [-1, 1], or zero for empty vectors.
+ */
+static double kc_embdex_cosine(const kc_embdex_t *index,
+    size_t ordinal, const float *query)
+{
+    const kc_embdex_record_t *record = &index->records[ordinal];
+    double dot = 0, left = 0, right = 0;
+
+    for (size_t j = 0; j < index->dimension; j++) {
+        double a = (double)query[j];
+        double b = record->owned_vector != NULL ?
+            (double)record->owned_vector[j] :
+            (double)kc_embdex_read_float(record->encoded +
+                j * sizeof(float));
+
+        dot += a * b;
+        left += a * a;
+        right += b * b;
+    }
+    if (left == 0 || right == 0) return 0;
+    {
+        double score = dot / sqrt(left * right);
+
+        return score > 1 ? 1 : score < -1 ? -1 : score;
+    }
+}
+
+/**
+ * Sort accepted associations by descending evidence score and stable ordinal.
  * @param left First candidate.
  * @param right Second candidate.
- * @return Sort order.
+ * @return Comparison order.
  */
 static int kc_embdex_rank_compare(const void *left, const void *right)
 {
@@ -683,74 +1016,120 @@ static int kc_embdex_rank_compare(const void *left, const void *right)
 }
 
 /**
- * Accumulate an independent rank contribution by document ordinal.
- * @param ranks Preallocated candidate array.
- * @param count Current candidate count.
- * @param capacity Maximum candidate count.
- * @param ordinal Unique association ordinal.
- * @param score Additional rank evidence.
- * @return KC_EMBDEX_OK or an error status.
- */
-static int kc_embdex_rank_add(kc_embdex_rank_t *ranks,
-    size_t *count, size_t capacity, size_t ordinal, double score)
-{
-    for (size_t i = 0; i < *count; i++) {
-        if (ranks[i].ordinal == ordinal) {
-            ranks[i].score += score;
-            return KC_EMBDEX_OK;
-        }
-    }
-    if (*count == capacity) return KC_EMBDEX_EINDEX;
-    ranks[*count].ordinal = ordinal;
-    ranks[*count].score = score;
-    (*count)++;
-    return KC_EMBDEX_OK;
-}
-
-/**
- * Retrieve candidates independently with BM25 and HNSW and rank by ordinal.
- * This baseline fusion will be superseded by the planned evidence evaluator
- * after relevance and false-positive measurements.
- * @param index Opened index.
- * @param query UTF-8 query.
- * @param options Optional result limit.
- * @param callback Receives borrowed results and may stop delivery.
- * @param userdata Passed unchanged to callback.
- * @return KC_EMBDEX_OK or an error status.
+ * Find relevant associations from independent lexical and semantic evidence.
+ * Query coverage, phrase matching and edit-distance uncertainty influence
+ * selection; a fixed similarity floor excludes weak uncorroborated neighbors.
+ * @param index Opened persistent index.
+ * @param query Natural-language text.
+ * @param options Optional maximum number of results.
+ * @param callback Receiver for borrowed results.
+ * @param userdata Receiver context.
+ * @return KC_EMBDEX_OK or a negative status.
  */
 int kc_embdex_search(const kc_embdex_t *index, const char *query,
     const kc_embdex_search_options_t *options,
     kc_embdex_result_fn callback, void *userdata)
 {
-    const size_t base_window = 100;
-    const double minimum_similarity = 0.35;
+    const double semantic_floor = 0.50;
+    const double semantic_only_floor = 0.58;
+    kc_embdex_tokens_t tokens = {0};
+    kc_embdex_evidence_t *evidence = NULL;
+    kc_embdex_rank_t *ranks = NULL;
     kc_bm25_result_t *lexical = NULL;
     kc_hnsw_result_t *semantic = NULL;
-    kc_embdex_rank_t *ranks = NULL;
     kc_bm25_search_options_t lexical_options = {0};
+    char *joined = NULL;
     float *embedding = NULL;
-    size_t limit = 10, window, capacity, dimension = 0, rank_count = 0;
-    size_t lexical_count = 0, semantic_count = 0, result_count;
+    size_t dimension = 0, limit = 10, window, lexical_count = 0;
+    size_t semantic_count = 0, rank_count = 0;
     int status = KC_EMBDEX_OK;
 
     if (index == NULL || query == NULL || callback == NULL ||
-        index->lexical == NULL || index->graph == NULL)
-        return KC_EMBDEX_EINVAL;
+        index->lexical == NULL) return KC_EMBDEX_EINVAL;
     if (options != NULL && options->limit != NULL)
         limit = *options->limit;
-    if (limit > INT_MAX) return KC_EMBDEX_EINVAL;
     if (limit == 0 || index->count == 0 || query[0] == '\0')
         return KC_EMBDEX_OK;
-
-    window = limit > base_window ? limit : base_window;
-    if (window > index->count) window = index->count;
-    if (window > SIZE_MAX / 2 ||
-        window * 2 > SIZE_MAX / sizeof(*ranks))
+    if (index->count > SIZE_MAX / sizeof(*evidence) ||
+        index->count > SIZE_MAX / sizeof(*ranks))
         return KC_EMBDEX_ENOMEM;
-    capacity = window * 2;
-    ranks = (kc_embdex_rank_t *)calloc(capacity, sizeof(*ranks));
-    if (ranks == NULL) return KC_EMBDEX_ENOMEM;
 
+    evidence = (kc_embdex_evidence_t *)calloc(index->count,
+        sizeof(*evidence));
+    ranks = (kc_embdex_rank_t *)calloc(index->count, sizeof(*ranks));
+    if (evidence == NULL || ranks == NULL) {
+        status = KC_EMBDEX_ENOMEM;
+        goto finished;
+    }
+    {
+        int result = kc_bm25_tokens(index->lexical, query,
+            kc_embdex_token_add, &tokens);
+
+        if (tokens.failed) {
+            status = KC_EMBDEX_ENOMEM;
+            goto finished;
+        }
+        if (result != KC_BM25_OK &&
+            !(result == KC_BM25_EABORT &&
+            tokens.count == KC_EMBDEX_QUERY_TOKENS))
+        {
+            status = KC_EMBDEX_ELEXICAL;
+            goto finished;
+        }
+    }
+    if (tokens.count == 0) goto finished;
+    joined = kc_embdex_join(&tokens);
+    if (joined == NULL) {
+        status = KC_EMBDEX_ENOMEM;
+        goto finished;
+    }
+
+    for (size_t i = 0; i < tokens.count; i++) {
+        kc_embdex_post_context_t post = {
+            evidence, index->count, i, 0, 0, 0
+        };
+        int result = kc_bm25_postings(index->lexical,
+            tokens.value[i], kc_embdex_posting_add, &post);
+
+        if (result != KC_BM25_OK || post.failed) {
+            status = KC_EMBDEX_ELEXICAL;
+            goto finished;
+        }
+        if (post.found == 0) {
+            size_t length = kc_embdex_length(tokens.value[i]);
+            size_t maximum = length >= 8 ? 2 : length >= 5 ? 1 : 0;
+
+            if (maximum > 0) {
+                kc_embdex_fuzzy_context_t fuzzy = {0};
+
+                fuzzy.word = tokens.value[i];
+                fuzzy.length = length;
+                fuzzy.maximum = maximum;
+                fuzzy.best = maximum;
+                result = kc_bm25_vocabulary(index->lexical,
+                    kc_embdex_fuzzy_visit, &fuzzy);
+                if (result != KC_BM25_OK || fuzzy.failed) {
+                    status = fuzzy.failed ? KC_EMBDEX_EINDEX :
+                        KC_EMBDEX_ELEXICAL;
+                    goto finished;
+                }
+                if (!fuzzy.ambiguous) {
+                    post.fuzzy = 1;
+                    for (size_t k = 0; k < fuzzy.count; k++) {
+                        result = kc_bm25_postings(index->lexical,
+                            fuzzy.choices[k], kc_embdex_posting_add,
+                            &post);
+                        if (result != KC_BM25_OK || post.failed) {
+                            status = KC_EMBDEX_ELEXICAL;
+                            goto finished;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    window = index->count;
     lexical_options.limit = &window;
     {
         int result = kc_bm25_search(index->lexical, query,
@@ -767,41 +1146,141 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
             status = KC_EMBDEX_EINDEX;
             goto finished;
         }
-        status = kc_embdex_rank_add(ranks, &rank_count, capacity,
-            lexical[i].ordinal, 1.0 / (61.0 + (double)i));
-        if (status != KC_EMBDEX_OK) goto finished;
+        evidence[lexical[i].ordinal].lexical_rank = i + 1;
     }
 
-    if (kc_emb_embed(query, &embedding, &dimension) != KC_EMB_OK ||
-        dimension != index->dimension)
-    {
-        status = KC_EMBDEX_EEMBED;
-        goto finished;
-    }
-    if (kc_hnsw_search(index->graph, embedding, window,
-        minimum_similarity, &semantic, &semantic_count) != KC_HNSW_OK)
-    {
-        status = KC_EMBDEX_EINDEX;
-        goto finished;
-    }
-    for (size_t i = 0; i < semantic_count; i++) {
-        char *end;
-        uintmax_t ordinal = strtoumax(semantic[i].id, &end, 10);
+    for (size_t i = 0; i < index->count; i++) {
+        kc_embdex_text_t document = {0};
+        kc_embdex_phrase_context_t phrase;
+        kc_ngram_options_t ngram_options = {0};
+        size_t minimum = 2, maximum = 4;
+        int result;
 
-        if (semantic[i].id[0] == '\0' || *end != '\0' ||
-            ordinal >= index->count)
-        {
-            status = KC_EMBDEX_EINDEX;
+        if (evidence[i].exact == 0 && evidence[i].fuzzy == 0 &&
+            evidence[i].lexical_rank == 0) continue;
+        result = kc_bm25_tokens(index->lexical,
+            index->records[i].content, kc_embdex_text_append, &document);
+        if (result != KC_BM25_OK || document.failed) {
+            free(document.text);
+            status = document.failed ? KC_EMBDEX_ENOMEM :
+                KC_EMBDEX_ELEXICAL;
             goto finished;
         }
-        status = kc_embdex_rank_add(ranks, &rank_count, capacity,
-            (size_t)ordinal, 1.0 / (61.0 + (double)i));
-        if (status != KC_EMBDEX_OK) goto finished;
+        if (document.text == NULL) {
+            document.text = kc_embdex_copy_string("");
+            if (document.text == NULL) {
+                status = KC_EMBDEX_ENOMEM;
+                goto finished;
+            }
+        }
+        evidence[i].full_phrase = kc_embdex_contains(
+            document.text, joined, strlen(joined));
+        if (evidence[i].full_phrase) {
+            evidence[i].exact = tokens.count == 64 ?
+                UINT64_MAX : (UINT64_C(1) << tokens.count) - 1;
+            evidence[i].longest = tokens.count;
+        } else if (tokens.count >= 2) {
+            if (tokens.count < maximum) maximum = tokens.count;
+            ngram_options.min_tokens = &minimum;
+            ngram_options.max_tokens = &maximum;
+            phrase.document = document.text;
+            phrase.evidence = &evidence[i];
+            if (kc_ngram_traverse(joined, &ngram_options,
+                kc_embdex_phrase_visit, &phrase) != KC_NGRAM_OK)
+            {
+                free(document.text);
+                status = KC_EMBDEX_EINDEX;
+                goto finished;
+            }
+        }
+        free(document.text);
+    }
+
+    {
+        int exact_full = 0;
+
+        for (size_t i = 0; i < index->count; i++)
+            exact_full |= evidence[i].full_phrase;
+        if (!exact_full || limit != 1) {
+            if (kc_emb_embed(query, &embedding, &dimension) != KC_EMB_OK ||
+                dimension != index->dimension)
+            {
+                status = KC_EMBDEX_EEMBED;
+                goto finished;
+            }
+            if (index->graph == NULL) {
+                for (size_t i = 0; i < index->count; i++) {
+                    double cosine = kc_embdex_cosine(index, i, embedding);
+
+                    if (cosine >= semantic_floor) {
+                        evidence[i].semantic = cosine;
+                        evidence[i].semantic_found = 1;
+                    }
+                }
+            } else {
+                int result = kc_hnsw_search(index->graph,
+                    embedding, index->count, semantic_floor,
+                    &semantic, &semantic_count);
+
+                if (result != KC_HNSW_OK) {
+                    status = KC_EMBDEX_EINDEX;
+                    goto finished;
+                }
+                for (size_t i = 0; i < semantic_count; i++) {
+                    char *end;
+                    uintmax_t ordinal = strtoumax(semantic[i].id, &end, 10);
+
+                    if (semantic[i].id[0] == '\0' || *end != '\0' ||
+                        ordinal >= index->count)
+                    {
+                        status = KC_EMBDEX_EINDEX;
+                        goto finished;
+                    }
+                    evidence[(size_t)ordinal].semantic = semantic[i].score;
+                    evidence[(size_t)ordinal].semantic_found = 1;
+                }
+            }
+        }
+    }
+
+    for (size_t i = 0; i < index->count; i++) {
+        const kc_embdex_evidence_t *item = &evidence[i];
+        uint64_t mask = item->exact | item->fuzzy | item->phrase;
+        size_t covered = kc_embdex_popcount(mask);
+        size_t exact = kc_embdex_popcount(item->exact);
+        size_t corrected = kc_embdex_popcount(item->fuzzy & ~item->exact);
+        double coverage = (double)covered / (double)tokens.count;
+        double precise = (double)exact / (double)tokens.count;
+        double phrase = (double)item->longest / (double)tokens.count;
+        double bm25 = item->lexical_rank != 0 ?
+            10.0 / (10.0 + (double)item->lexical_rank) : 0.0;
+        double semantic_score = item->semantic_found ?
+            item->semantic : 0.0;
+        double score;
+        int accepted;
+
+        accepted = item->full_phrase ||
+            (exact == tokens.count) ||
+            (coverage >= 0.5 && (exact > 0 || corrected > 0)) ||
+            (item->semantic_found &&
+                semantic_score >= semantic_only_floor) ||
+            (item->semantic_found && semantic_score >= semantic_floor &&
+                (exact > 0 || corrected > 0 || item->lexical_rank != 0)) ||
+            (tokens.count == 1 && corrected > 0);
+        if (!accepted) continue;
+
+        score = 0.45 * coverage + 0.25 * precise +
+            0.15 * phrase + 0.10 * bm25 +
+            0.20 * semantic_score -
+            0.08 * ((double)corrected / (double)tokens.count);
+        if (item->full_phrase) score += 0.5;
+        ranks[rank_count].ordinal = i;
+        ranks[rank_count++].score = score;
     }
 
     qsort(ranks, rank_count, sizeof(*ranks), kc_embdex_rank_compare);
-    result_count = rank_count < limit ? rank_count : limit;
-    for (size_t i = 0; i < result_count; i++) {
+    if (rank_count > limit) rank_count = limit;
+    for (size_t i = 0; i < rank_count; i++) {
         size_t ordinal = ranks[i].ordinal;
         kc_embdex_result_t result = {
             index->records[ordinal].id,
@@ -816,6 +1295,9 @@ finished:
     kc_bm25_free(lexical);
     kc_hnsw_free(semantic);
     kc_emb_free(embedding);
+    kc_embdex_tokens_close(&tokens);
+    free(joined);
+    free(evidence);
     free(ranks);
     return status;
 }
