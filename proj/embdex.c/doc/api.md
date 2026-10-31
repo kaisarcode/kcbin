@@ -168,7 +168,8 @@ used, still receives the complete original query. The entire input is
 checked for valid UTF-8 before lexical retrieval.
 
 Indexes up to 256 associations use exact cosine and skip a resident
-HNSW graph; larger indexes construct HNSW at open time.
+HNSW graph; larger indexes construct HNSW at open time. All maps
+use format version 3 and must be rebuilt when the serialized format changes.
 
 ## Dictionary-compiled maps
 
@@ -208,13 +209,12 @@ int status = kc_embdex_build_with_dictionaries(
     "mapa.bin", documents, document_count, dictionaries, 2);
 ```
 
-The existing `kc_embdex_build()` remains available for maps that do not
-specify dictionary inputs. An older `KC_EMBDEX_WORDMAP` environment
-configuration is still recognized for compatibility with experimental
-indexes, but explicit dictionary files are the preferred build interface.
+The `kc_embdex_build()` operation builds maps without dictionary
+substitutions. Dictionaries are supplied only at build time; search
+needs only the compiled map.
 
 This is literal substitution rather than sentence translation. Unmatched
-words are preserved. Queries can test up to 16 deterministic combinations
+words are preserved. Queries can test up to eight deterministic combinations
 when words have alternative replacements. If the complete combination set
 fits the budget it is enumerated; otherwise candidate combinations are
 distributed across the ambiguous positions. Duplicate resulting strings
@@ -226,8 +226,8 @@ also contribute lexical evidence. A map is an approximate candidate
 narrower for downstream classification; it does not assign final meaning
 to a word or guarantee that an arbitrary query has a correct result.
 
-Set `KC_EMBDEX_WORDMAP_VARIANTS` to change the variant budget (default 8,
-maximum 16). `KC_EMBDEX_TRACE` records candidate evidence, including
+The variant budget is fixed at eight. `KC_EMBDEX_TRACE`
+records candidate evidence, including
 `mapped`, `mapped_bm25_rank`, `composition_rank`,
 `literal_starts`, `mapped_starts`, `fusion_rrf`, and `variant_scores`.
 `KC_EMBDEX_WORDMAP_TRACE` records the actual substituted query strings.
