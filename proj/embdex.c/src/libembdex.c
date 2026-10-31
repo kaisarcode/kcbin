@@ -28,7 +28,7 @@
 #endif
 
 #define KC_EMBDEX_HEADER_SIZE 72U
-#define KC_EMBDEX_MAPPED_HEADER_SIZE 88U
+#define KC_EMBDEX_MAPPED_HEADER_SIZE 104U
 #define KC_EMBDEX_FORMAT_VERSION 1U
 #define KC_EMBDEX_MAPPED_FORMAT_VERSION 2U
 #define KC_EMBDEX_MODEL_SIZE 32U
@@ -74,6 +74,9 @@ struct kc_embdex {
     size_t lexical_size;
     size_t mapped_lexical_offset;
     size_t mapped_lexical_size;
+    size_t wordmap_offset;
+    size_t wordmap_size;
+    uint32_t format_version;
     kc_embdex_word_t *wordmap;
     size_t word_count;
     char model_tag[KC_EMBDEX_MODEL_SIZE];
@@ -901,26 +904,65 @@ static int kc_embdex_load_records(kc_embdex_t *index)
     size_t offset;
     const unsigned char *data;
     uint64_t count;
+    uint32_t version;
+    size_t header_size;
 
     if (kc_mmap_get(index->mapping, &bytes, &size) != KC_MMAP_OK ||
         size < KC_EMBDEX_HEADER_SIZE) {
         return KC_EMBDEX_EFORMAT;
     }
     data = (const unsigned char *)bytes;
+    version = kc_embdex_read_u32(data + 8);
+    header_size = version == KC_EMBDEX_MAPPED_FORMAT_VERSION ?
+        KC_EMBDEX_MAPPED_HEADER_SIZE : KC_EMBDEX_HEADER_SIZE;
     if (memcmp(data, kc_embdex_magic, 8) != 0 ||
-        kc_embdex_read_u32(data + 8) != KC_EMBDEX_FORMAT_VERSION ||
-        memcmp(data + 24, index->model_tag, KC_EMBDEX_MODEL_SIZE) != 0)
+        (version != KC_EMBDEX_FORMAT_VERSION &&
+        version != KC_EMBDEX_MAPPED_FORMAT_VERSION) ||
+        size < header_size)
         return KC_EMBDEX_EFORMAT;
+    if (version == KC_EMBDEX_FORMAT_VERSION) {
+        if (memcmp(data + 24, index->model_tag,
+            KC_EMBDEX_MODEL_SIZE) != 0)
+            return KC_EMBDEX_EFORMAT;
+    } else {
+        size_t model_length = strlen(kc_embdex_model);
+
+        if (memcmp(data + 24, kc_embdex_model, model_length) != 0 ||
+            data[24 + model_length] != '+')
+            return KC_EMBDEX_EFORMAT;
+    }
+    index->format_version = version;
     {
         uint64_t lexical_offset = kc_embdex_read_u64(data + 56);
         uint64_t lexical_size = kc_embdex_read_u64(data + 64);
 
-        if (lexical_offset > size || lexical_size == 0 ||
-            lexical_size > size - lexical_offset ||
-            lexical_offset + lexical_size != size)
+        if (lexical_offset < header_size ||
+            lexical_offset > size || lexical_size == 0 ||
+            lexical_size > size - lexical_offset)
             return KC_EMBDEX_EFORMAT;
         index->lexical_offset = (size_t)lexical_offset;
         index->lexical_size = (size_t)lexical_size;
+        if (version == KC_EMBDEX_MAPPED_FORMAT_VERSION) {
+            uint64_t mapped_offset = kc_embdex_read_u64(data + 72);
+            uint64_t mapped_size = kc_embdex_read_u64(data + 80);
+            uint64_t words_offset = kc_embdex_read_u64(data + 88);
+            uint64_t words_size = kc_embdex_read_u64(data + 96);
+
+            if (mapped_offset != lexical_offset + lexical_size ||
+                mapped_offset > size || mapped_size == 0 ||
+                mapped_size > size - mapped_offset ||
+                words_offset != mapped_offset + mapped_size ||
+                words_offset > size || words_size < 4 ||
+                words_size > size - words_offset ||
+                words_offset + words_size != size)
+                return KC_EMBDEX_EFORMAT;
+            index->mapped_lexical_offset = (size_t)mapped_offset;
+            index->mapped_lexical_size = (size_t)mapped_size;
+            index->wordmap_offset = (size_t)words_offset;
+            index->wordmap_size = (size_t)words_size;
+        } else if (lexical_offset + lexical_size != size) {
+            return KC_EMBDEX_EFORMAT;
+        }
     }
     index->dimension = kc_embdex_read_u32(data + 12);
     count = kc_embdex_read_u64(data + 16);
@@ -938,7 +980,7 @@ static int kc_embdex_load_records(kc_embdex_t *index)
             return KC_EMBDEX_ENOMEM;
         }
     }
-    offset = KC_EMBDEX_HEADER_SIZE;
+    offset = header_size;
     for (size_t i = 0; i < index->count; i++) {
         size_t id_length;
         size_t content_length;
@@ -1052,7 +1094,8 @@ static int kc_embdex_serialized_size(
     size_t *out_size
 )
 {
-    size_t total = KC_EMBDEX_HEADER_SIZE;
+    size_t total = index->word_count == 0 ?
+        KC_EMBDEX_HEADER_SIZE : KC_EMBDEX_MAPPED_HEADER_SIZE;
 
     if (index->dimension > SIZE_MAX / sizeof(float)) {
         return KC_EMBDEX_EFORMAT;
