@@ -1,5 +1,5 @@
 /**
- * libsemidx.c - Semantic Index Implementation
+ * libembdex.c - Semantic Index Implementation
  * Summary: Composes embeddings, HNSW, BM25, and mapped persistence.
  *
  * Author:  KaisarCode
@@ -7,7 +7,7 @@
  * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
 
-#include "libsemidx.h"
+#include "libembdex.h"
 #include "libemb.h"
 #include "libbm25.h"
 #include "libhnsw.h"
@@ -21,17 +21,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef KC_SEMIDX_BUILD_VERSION
-#define KC_SEMIDX_BUILD_VERSION 0
+#ifndef KC_EMBDEX_BUILD_VERSION
+#define KC_EMBDEX_BUILD_VERSION 0
 #endif
 
-#define KC_SEMIDX_HEADER_SIZE 68U
-#define KC_SEMIDX_MODEL_SIZE 32U
+#define KC_EMBDEX_HEADER_SIZE 68U
+#define KC_EMBDEX_MODEL_SIZE 32U
 
-static const unsigned char kc_semidx_magic[8] = {
+static const unsigned char kc_embdex_magic[8] = {
     'K', 'C', 'S', 'I', 'D', 'X', '\r', '\n'
 };
-static const char kc_semidx_model[KC_SEMIDX_MODEL_SIZE] =
+static const char kc_embdex_model[KC_EMBDEX_MODEL_SIZE] =
     "bge-small-en-v1.5";
 
 typedef struct {
@@ -40,10 +40,10 @@ typedef struct {
     const unsigned char *encoded;
     float *owned_vector;
     int owned_strings;
-} kc_semidx_record_t;
+} kc_embdex_record_t;
 
-struct kc_semidx {
-    kc_semidx_record_t *records;
+struct kc_embdex {
+    kc_embdex_record_t *records;
     size_t count;
     size_t dimension;
     kc_hnsw_t *graph;
@@ -60,7 +60,7 @@ struct kc_semidx {
  * @param length Required number of bytes.
  * @return Nonzero when the slice is valid.
  */
-static int kc_semidx_fits(size_t size, size_t offset, size_t length)
+static int kc_embdex_fits(size_t size, size_t offset, size_t length)
 {
     return offset <= size && length <= size - offset;
 }
@@ -70,7 +70,7 @@ static int kc_semidx_fits(size_t size, size_t offset, size_t length)
  * @param data Pointer to at least four encoded bytes.
  * @return Decoded value.
  */
-static uint32_t kc_semidx_read_u32(const unsigned char *data)
+static uint32_t kc_embdex_read_u32(const unsigned char *data)
 {
     return (uint32_t)data[0] |
         ((uint32_t)data[1] << 8) |
@@ -83,7 +83,7 @@ static uint32_t kc_semidx_read_u32(const unsigned char *data)
  * @param data Pointer to at least eight encoded bytes.
  * @return Decoded value.
  */
-static uint64_t kc_semidx_read_u64(const unsigned char *data)
+static uint64_t kc_embdex_read_u64(const unsigned char *data)
 {
     uint64_t value = 0;
 
@@ -99,7 +99,7 @@ static uint64_t kc_semidx_read_u64(const unsigned char *data)
  * @param value Value to encode.
  * @return void
  */
-static void kc_semidx_write_u32(unsigned char *data, uint32_t value)
+static void kc_embdex_write_u32(unsigned char *data, uint32_t value)
 {
     for (unsigned int i = 0; i < 4; i++) {
         data[i] = (unsigned char)(value >> (i * 8));
@@ -112,7 +112,7 @@ static void kc_semidx_write_u32(unsigned char *data, uint32_t value)
  * @param value Value to encode.
  * @return void
  */
-static void kc_semidx_write_u64(unsigned char *data, uint64_t value)
+static void kc_embdex_write_u64(unsigned char *data, uint64_t value)
 {
     for (unsigned int i = 0; i < 8; i++) {
         data[i] = (unsigned char)(value >> (i * 8));
@@ -124,9 +124,9 @@ static void kc_semidx_write_u64(unsigned char *data, uint64_t value)
  * @param data Pointer to four encoded bytes.
  * @return Decoded floating-point value.
  */
-static float kc_semidx_read_float(const unsigned char *data)
+static float kc_embdex_read_float(const unsigned char *data)
 {
-    uint32_t bits = kc_semidx_read_u32(data);
+    uint32_t bits = kc_embdex_read_u32(data);
     float value;
 
     memcpy(&value, &bits, sizeof(value));
@@ -139,12 +139,12 @@ static float kc_semidx_read_float(const unsigned char *data)
  * @param value Floating-point value.
  * @return void
  */
-static void kc_semidx_write_float(unsigned char *data, float value)
+static void kc_embdex_write_float(unsigned char *data, float value)
 {
     uint32_t bits;
 
     memcpy(&bits, &value, sizeof(bits));
-    kc_semidx_write_u32(data, bits);
+    kc_embdex_write_u32(data, bits);
 }
 
 /**
@@ -152,7 +152,7 @@ static void kc_semidx_write_float(unsigned char *data, float value)
  * @param input Input string.
  * @return Allocated copy, or NULL on allocation failure.
  */
-static char *kc_semidx_copy_string(const char *input)
+static char *kc_embdex_copy_string(const char *input)
 {
     size_t length;
     char *copy;
@@ -176,9 +176,9 @@ static char *kc_semidx_copy_string(const char *input)
  * @param count Number of document references to allocate.
  * @return New index or NULL if allocation fails.
  */
-static kc_semidx_t *kc_semidx_allocate(size_t count)
+static kc_embdex_t *kc_embdex_allocate(size_t count)
 {
-    kc_semidx_t *index = (kc_semidx_t *)calloc(1, sizeof(*index));
+    kc_embdex_t *index = (kc_embdex_t *)calloc(1, sizeof(*index));
 
     if (index == NULL) {
         return NULL;
@@ -188,7 +188,7 @@ static kc_semidx_t *kc_semidx_allocate(size_t count)
         return NULL;
     }
     if (count > 0) {
-        index->records = (kc_semidx_record_t *)calloc(
+        index->records = (kc_embdex_record_t *)calloc(
             count, sizeof(*index->records)
         );
         if (index->records == NULL) {
@@ -203,25 +203,25 @@ static kc_semidx_t *kc_semidx_allocate(size_t count)
 /**
  * Add vectors to a new HNSW graph using unique positional identifiers.
  * @param index Index with validated record references and dimensions.
- * @return KC_SEMIDX_OK or a negative status code.
+ * @return KC_EMBDEX_OK or a negative status code.
  */
-static int kc_semidx_prepare_graph(kc_semidx_t *index)
+static int kc_embdex_prepare_graph(kc_embdex_t *index)
 {
     kc_hnsw_options_t options = {0};
     float *decoded = NULL;
-    int status = KC_SEMIDX_EINDEX;
+    int status = KC_EMBDEX_EINDEX;
 
     options.dimension = index->dimension;
     if (kc_hnsw_open(&index->graph, &options) != KC_HNSW_OK) {
-        return KC_SEMIDX_EINDEX;
+        return KC_EMBDEX_EINDEX;
     }
     if (index->mapping != NULL && index->count > 0) {
         if (index->dimension > SIZE_MAX / sizeof(float)) {
-            return KC_SEMIDX_EFORMAT;
+            return KC_EMBDEX_EFORMAT;
         }
         decoded = (float *)malloc(index->dimension * sizeof(float));
         if (decoded == NULL) {
-            return KC_SEMIDX_ENOMEM;
+            return KC_EMBDEX_ENOMEM;
         }
     }
 
@@ -234,11 +234,11 @@ static int kc_semidx_prepare_graph(kc_semidx_t *index)
         }
         if (index->mapping != NULL) {
             for (size_t j = 0; j < index->dimension; j++) {
-                decoded[j] = kc_semidx_read_float(
+                decoded[j] = kc_embdex_read_float(
                     index->records[i].encoded + j * sizeof(float)
                 );
                 if (!isfinite(decoded[j])) {
-                    status = KC_SEMIDX_EFORMAT;
+                    status = KC_EMBDEX_EFORMAT;
                     goto finished;
                 }
             }
@@ -249,7 +249,7 @@ static int kc_semidx_prepare_graph(kc_semidx_t *index)
         }
     }
     if (kc_hnsw_build(index->graph) == KC_HNSW_OK) {
-        status = KC_SEMIDX_OK;
+        status = KC_EMBDEX_OK;
     }
 
 finished:
@@ -260,30 +260,30 @@ finished:
 /**
  * Construct the independent lexical index over the same ordered associations.
  * @param index Index with owned or mapped document strings.
- * @return KC_SEMIDX_OK or an appropriate negative status.
+ * @return KC_EMBDEX_OK or an appropriate negative status.
  */
-static int kc_semidx_prepare_lexical(kc_semidx_t *index)
+static int kc_embdex_prepare_lexical(kc_embdex_t *index)
 {
     int status = kc_bm25_open(&index->lexical, NULL);
 
     if (status != KC_BM25_OK) {
-        return status == KC_BM25_ENOMEM ? KC_SEMIDX_ENOMEM : KC_SEMIDX_ELEXICAL;
+        return status == KC_BM25_ENOMEM ? KC_EMBDEX_ENOMEM : KC_EMBDEX_ELEXICAL;
     }
     for (size_t i = 0; i < index->count; i++) {
         char ordinal[32];
 
         if (snprintf(ordinal, sizeof(ordinal), "%zu", i) < 0)
-            return KC_SEMIDX_ELEXICAL;
+            return KC_EMBDEX_ELEXICAL;
         status = kc_bm25_add(index->lexical,
             ordinal, index->records[i].content);
         if (status != KC_BM25_OK) {
             return status == KC_BM25_ENOMEM ?
-                KC_SEMIDX_ENOMEM : KC_SEMIDX_ELEXICAL;
+                KC_EMBDEX_ENOMEM : KC_EMBDEX_ELEXICAL;
         }
     }
     status = kc_bm25_build(index->lexical);
-    return status == KC_BM25_OK ? KC_SEMIDX_OK :
-        status == KC_BM25_ENOMEM ? KC_SEMIDX_ENOMEM : KC_SEMIDX_ELEXICAL;
+    return status == KC_BM25_OK ? KC_EMBDEX_OK :
+        status == KC_BM25_ENOMEM ? KC_EMBDEX_ENOMEM : KC_EMBDEX_ELEXICAL;
 }
 
 /**
@@ -291,33 +291,33 @@ static int kc_semidx_prepare_lexical(kc_semidx_t *index)
  * @param out Receives the built index.
  * @param documents Input corpus.
  * @param count Number of entries in the corpus.
- * @return KC_SEMIDX_OK or a negative status code.
+ * @return KC_EMBDEX_OK or a negative status code.
  */
-int kc_semidx_build(
-    kc_semidx_t **out,
-    const kc_semidx_document_t *documents,
+int kc_embdex_build(
+    kc_embdex_t **out,
+    const kc_embdex_document_t *documents,
     size_t count
 )
 {
-    kc_semidx_t *index;
-    int status = KC_SEMIDX_EEMBED;
+    kc_embdex_t *index;
+    int status = KC_EMBDEX_EEMBED;
 
     if (out == NULL) {
-        return KC_SEMIDX_EINVAL;
+        return KC_EMBDEX_EINVAL;
     }
     *out = NULL;
     if (count > 0 && documents == NULL) {
-        return KC_SEMIDX_EINVAL;
+        return KC_EMBDEX_EINVAL;
     }
     for (size_t i = 0; i < count; i++) {
         if (documents[i].id == NULL || documents[i].content == NULL) {
-            return KC_SEMIDX_EINVAL;
+            return KC_EMBDEX_EINVAL;
         }
     }
 
-    index = kc_semidx_allocate(count);
+    index = kc_embdex_allocate(count);
     if (index == NULL) {
-        return KC_SEMIDX_ENOMEM;
+        return KC_EMBDEX_ENOMEM;
     }
     index->dimension = kc_emb_dimension();
     if (index->dimension == 0 ||
@@ -328,14 +328,14 @@ int kc_semidx_build(
     for (size_t i = 0; i < count; i++) {
         size_t length = 0;
 
-        index->records[i].id = kc_semidx_copy_string(documents[i].id);
-        index->records[i].content = kc_semidx_copy_string(
+        index->records[i].id = kc_embdex_copy_string(documents[i].id);
+        index->records[i].content = kc_embdex_copy_string(
             documents[i].content
         );
         index->records[i].owned_strings = 1;
         if (index->records[i].id == NULL ||
             index->records[i].content == NULL) {
-            status = KC_SEMIDX_ENOMEM;
+            status = KC_EMBDEX_ENOMEM;
             goto failure;
         }
         if (kc_emb_embed(
@@ -346,28 +346,28 @@ int kc_semidx_build(
             goto failure;
         }
     }
-    status = kc_semidx_prepare_graph(index);
-    if (status != KC_SEMIDX_OK) {
+    status = kc_embdex_prepare_graph(index);
+    if (status != KC_EMBDEX_OK) {
         goto failure;
     }
-    status = kc_semidx_prepare_lexical(index);
-    if (status != KC_SEMIDX_OK) {
+    status = kc_embdex_prepare_lexical(index);
+    if (status != KC_EMBDEX_OK) {
         goto failure;
     }
     *out = index;
-    return KC_SEMIDX_OK;
+    return KC_EMBDEX_OK;
 
 failure:
-    kc_semidx_close(index);
+    kc_embdex_close(index);
     return status;
 }
 
 /**
  * Load and validate the binary records from an opened mapping.
  * @param index Destination index with a live file mapping.
- * @return KC_SEMIDX_OK or a negative status code.
+ * @return KC_EMBDEX_OK or a negative status code.
  */
-static int kc_semidx_load_records(kc_semidx_t *index)
+static int kc_embdex_load_records(kc_embdex_t *index)
 {
     const void *bytes;
     size_t size;
@@ -376,112 +376,112 @@ static int kc_semidx_load_records(kc_semidx_t *index)
     uint64_t count;
 
     if (kc_mmap_get(index->mapping, &bytes, &size) != KC_MMAP_OK ||
-        size < KC_SEMIDX_HEADER_SIZE) {
-        return KC_SEMIDX_EFORMAT;
+        size < KC_EMBDEX_HEADER_SIZE) {
+        return KC_EMBDEX_EFORMAT;
     }
     data = (const unsigned char *)bytes;
-    if (memcmp(data, kc_semidx_magic, 8) != 0 ||
-        memcmp(data + 20, kc_semidx_model, KC_SEMIDX_MODEL_SIZE) != 0)
-        return KC_SEMIDX_EFORMAT;
+    if (memcmp(data, kc_embdex_magic, 8) != 0 ||
+        memcmp(data + 20, kc_embdex_model, KC_EMBDEX_MODEL_SIZE) != 0)
+        return KC_EMBDEX_EFORMAT;
     {
-        uint64_t lexical_offset = kc_semidx_read_u64(data + 52);
-        uint64_t lexical_size = kc_semidx_read_u64(data + 60);
+        uint64_t lexical_offset = kc_embdex_read_u64(data + 52);
+        uint64_t lexical_size = kc_embdex_read_u64(data + 60);
 
         if (lexical_offset > size || lexical_size == 0 ||
             lexical_size > size - lexical_offset ||
             lexical_offset + lexical_size != size)
-            return KC_SEMIDX_EFORMAT;
+            return KC_EMBDEX_EFORMAT;
         index->lexical_offset = (size_t)lexical_offset;
         index->lexical_size = (size_t)lexical_size;
     }
-    index->dimension = kc_semidx_read_u32(data + 8);
-    count = kc_semidx_read_u64(data + 12);
+    index->dimension = kc_embdex_read_u32(data + 8);
+    count = kc_embdex_read_u64(data + 12);
     if (index->dimension == 0 || index->dimension != kc_emb_dimension() ||
         index->dimension > SIZE_MAX / sizeof(float) ||
-        count > SIZE_MAX / sizeof(kc_semidx_record_t)) {
-        return KC_SEMIDX_EFORMAT;
+        count > SIZE_MAX / sizeof(kc_embdex_record_t)) {
+        return KC_EMBDEX_EFORMAT;
     }
     index->count = (size_t)count;
     if (index->count > 0) {
-        index->records = (kc_semidx_record_t *)calloc(
+        index->records = (kc_embdex_record_t *)calloc(
             index->count, sizeof(*index->records)
         );
         if (index->records == NULL) {
-            return KC_SEMIDX_ENOMEM;
+            return KC_EMBDEX_ENOMEM;
         }
     }
-    offset = KC_SEMIDX_HEADER_SIZE;
+    offset = KC_EMBDEX_HEADER_SIZE;
     for (size_t i = 0; i < index->count; i++) {
         size_t id_length;
         size_t content_length;
 
-        if (!kc_semidx_fits(size, offset, 8)) {
-            return KC_SEMIDX_EFORMAT;
+        if (!kc_embdex_fits(size, offset, 8)) {
+            return KC_EMBDEX_EFORMAT;
         }
-        id_length = kc_semidx_read_u32(data + offset);
-        content_length = kc_semidx_read_u32(data + offset + 4);
+        id_length = kc_embdex_read_u32(data + offset);
+        content_length = kc_embdex_read_u32(data + offset + 4);
         offset += 8;
-        if (!kc_semidx_fits(size, offset, id_length + 1) ||
+        if (!kc_embdex_fits(size, offset, id_length + 1) ||
             data[offset + id_length] != 0 ||
             memchr(data + offset, 0, id_length) != NULL) {
-            return KC_SEMIDX_EFORMAT;
+            return KC_EMBDEX_EFORMAT;
         }
         index->records[i].id = (const char *)(data + offset);
         offset += id_length + 1;
-        if (!kc_semidx_fits(size, offset, content_length + 1) ||
+        if (!kc_embdex_fits(size, offset, content_length + 1) ||
             data[offset + content_length] != 0 ||
             memchr(data + offset, 0, content_length) != NULL) {
-            return KC_SEMIDX_EFORMAT;
+            return KC_EMBDEX_EFORMAT;
         }
         index->records[i].content = (const char *)(data + offset);
         offset += content_length + 1;
-        if (!kc_semidx_fits(size, offset, index->dimension * sizeof(float))) {
-            return KC_SEMIDX_EFORMAT;
+        if (!kc_embdex_fits(size, offset, index->dimension * sizeof(float))) {
+            return KC_EMBDEX_EFORMAT;
         }
         index->records[i].encoded = data + offset;
         offset += index->dimension * sizeof(float);
     }
     return offset == index->lexical_offset ?
-        KC_SEMIDX_OK : KC_SEMIDX_EFORMAT;
+        KC_EMBDEX_OK : KC_EMBDEX_EFORMAT;
 }
 
 /**
  * Open a binary semantic index and reconstruct its in-memory graph.
  * @param out Receives the opened index.
  * @param path Index file path.
- * @return KC_SEMIDX_OK or a negative status code.
+ * @return KC_EMBDEX_OK or a negative status code.
  */
-int kc_semidx_open(kc_semidx_t **out, const char *path)
+int kc_embdex_open(kc_embdex_t **out, const char *path)
 {
-    kc_semidx_t *index;
+    kc_embdex_t *index;
     int status;
 
     if (out == NULL) {
-        return KC_SEMIDX_EINVAL;
+        return KC_EMBDEX_EINVAL;
     }
     *out = NULL;
     if (path == NULL || path[0] == '\0') {
-        return KC_SEMIDX_EINVAL;
+        return KC_EMBDEX_EINVAL;
     }
-    index = kc_semidx_allocate(0);
+    index = kc_embdex_allocate(0);
     if (index == NULL) {
-        return KC_SEMIDX_ENOMEM;
+        return KC_EMBDEX_ENOMEM;
     }
     if (kc_mmap_open(&index->mapping, path) != KC_MMAP_OK) {
-        kc_semidx_close(index);
-        return KC_SEMIDX_EIO;
+        kc_embdex_close(index);
+        return KC_EMBDEX_EIO;
     }
-    status = kc_semidx_load_records(index);
-    if (status == KC_SEMIDX_OK) {
-        status = kc_semidx_prepare_graph(index);
+    status = kc_embdex_load_records(index);
+    if (status == KC_EMBDEX_OK) {
+        status = kc_embdex_prepare_graph(index);
     }
-    if (status == KC_SEMIDX_OK) {
+    if (status == KC_EMBDEX_OK) {
         const void *mapped = NULL;
         size_t mapped_size = 0;
         int lexical_status = KC_BM25_EFORMAT;
 
         if (kc_mmap_get(index->mapping, &mapped, &mapped_size) == KC_MMAP_OK &&
-            kc_semidx_fits(mapped_size, index->lexical_offset,
+            kc_embdex_fits(mapped_size, index->lexical_offset,
                 index->lexical_size))
         {
             lexical_status = kc_bm25_import(&index->lexical,
@@ -490,33 +490,33 @@ int kc_semidx_open(kc_semidx_t **out, const char *path)
         }
         if (lexical_status != KC_BM25_OK)
             status = lexical_status == KC_BM25_ENOMEM ?
-                KC_SEMIDX_ENOMEM : KC_SEMIDX_EFORMAT;
+                KC_EMBDEX_ENOMEM : KC_EMBDEX_EFORMAT;
         else if (kc_bm25_count(index->lexical) != index->count)
-            status = KC_SEMIDX_EFORMAT;
+            status = KC_EMBDEX_EFORMAT;
     }
-    if (status != KC_SEMIDX_OK) {
-        kc_semidx_close(index);
+    if (status != KC_EMBDEX_OK) {
+        kc_embdex_close(index);
         return status;
     }
     *out = index;
-    return KC_SEMIDX_OK;
+    return KC_EMBDEX_OK;
 }
 
 /**
  * Compute a checked serialized size for a built index.
  * @param index Index to measure.
  * @param out_size Receives the serialized byte size.
- * @return KC_SEMIDX_OK or a negative status code.
+ * @return KC_EMBDEX_OK or a negative status code.
  */
-static int kc_semidx_serialized_size(
-    const kc_semidx_t *index,
+static int kc_embdex_serialized_size(
+    const kc_embdex_t *index,
     size_t *out_size
 )
 {
-    size_t total = KC_SEMIDX_HEADER_SIZE;
+    size_t total = KC_EMBDEX_HEADER_SIZE;
 
     if (index->dimension > SIZE_MAX / sizeof(float)) {
-        return KC_SEMIDX_EFORMAT;
+        return KC_EMBDEX_EFORMAT;
     }
     for (size_t i = 0; i < index->count; i++) {
         size_t id_length = strlen(index->records[i].id);
@@ -526,81 +526,81 @@ static int kc_semidx_serialized_size(
         if (id_length > UINT32_MAX || content_length > UINT32_MAX ||
             id_length > SIZE_MAX - 1 ||
             content_length > SIZE_MAX - 1) {
-            return KC_SEMIDX_EFORMAT;
+            return KC_EMBDEX_EFORMAT;
         }
         if (id_length > SIZE_MAX - 9 ||
-            !kc_semidx_fits(SIZE_MAX, total, id_length + 9)) {
-            return KC_SEMIDX_EFORMAT;
+            !kc_embdex_fits(SIZE_MAX, total, id_length + 9)) {
+            return KC_EMBDEX_EFORMAT;
         }
         total += id_length + 9;
-        if (!kc_semidx_fits(SIZE_MAX, total, content_length + 1)) {
-            return KC_SEMIDX_EFORMAT;
+        if (!kc_embdex_fits(SIZE_MAX, total, content_length + 1)) {
+            return KC_EMBDEX_EFORMAT;
         }
         total += content_length + 1;
-        if (!kc_semidx_fits(SIZE_MAX, total, vector_size)) {
-            return KC_SEMIDX_EFORMAT;
+        if (!kc_embdex_fits(SIZE_MAX, total, vector_size)) {
+            return KC_EMBDEX_EFORMAT;
         }
         total += vector_size;
     }
     *out_size = total;
-    return KC_SEMIDX_OK;
+    return KC_EMBDEX_OK;
 }
 
 /**
  * Save a built index with little-endian lengths and vectors.
- * @param index Index created by kc_semidx_build().
+ * @param index Index created by kc_embdex_build().
  * @param path Binary destination file.
- * @return KC_SEMIDX_OK or a negative status code.
+ * @return KC_EMBDEX_OK or a negative status code.
  */
-int kc_semidx_save(const kc_semidx_t *index, const char *path)
+int kc_embdex_save(const kc_embdex_t *index, const char *path)
 {
     kc_mmap_t *mapping = NULL;
     unsigned char *data;
     void *lexical_bytes = NULL;
     size_t size, lexical_size = 0, record_size;
-    size_t offset = KC_SEMIDX_HEADER_SIZE;
-    int status = KC_SEMIDX_EIO;
+    size_t offset = KC_EMBDEX_HEADER_SIZE;
+    int status = KC_EMBDEX_EIO;
 
     if (index == NULL || path == NULL || path[0] == '\0') {
-        return KC_SEMIDX_EINVAL;
+        return KC_EMBDEX_EINVAL;
     }
     if (index->mapping != NULL) {
-        return KC_SEMIDX_ESTATE;
+        return KC_EMBDEX_ESTATE;
     }
-    if (index->lexical == NULL) return KC_SEMIDX_ESTATE;
-    status = kc_semidx_serialized_size(index, &record_size);
-    if (status != KC_SEMIDX_OK) return status;
+    if (index->lexical == NULL) return KC_EMBDEX_ESTATE;
+    status = kc_embdex_serialized_size(index, &record_size);
+    if (status != KC_EMBDEX_OK) return status;
     {
         int lexical_status = kc_bm25_export(index->lexical,
             &lexical_bytes, &lexical_size);
 
         if (lexical_status != KC_BM25_OK)
             return lexical_status == KC_BM25_ENOMEM ?
-                KC_SEMIDX_ENOMEM : KC_SEMIDX_ELEXICAL;
+                KC_EMBDEX_ENOMEM : KC_EMBDEX_ELEXICAL;
     }
     if (record_size > SIZE_MAX - lexical_size) {
         kc_bm25_free(lexical_bytes);
-        return KC_SEMIDX_ENOMEM;
+        return KC_EMBDEX_ENOMEM;
     }
     size = record_size + lexical_size;
     data = (unsigned char *)malloc(size);
     if (data == NULL) {
         kc_bm25_free(lexical_bytes);
-        return KC_SEMIDX_ENOMEM;
+        return KC_EMBDEX_ENOMEM;
     }
-    memcpy(data, kc_semidx_magic, 8);
-    kc_semidx_write_u32(data + 8, (uint32_t)index->dimension);
-    kc_semidx_write_u64(data + 12, (uint64_t)index->count);
-    memcpy(data + 20, kc_semidx_model, KC_SEMIDX_MODEL_SIZE);
-    kc_semidx_write_u64(data + 52, (uint64_t)record_size);
-    kc_semidx_write_u64(data + 60, (uint64_t)lexical_size);
+    memcpy(data, kc_embdex_magic, 8);
+    kc_embdex_write_u32(data + 8, (uint32_t)index->dimension);
+    kc_embdex_write_u64(data + 12, (uint64_t)index->count);
+    memcpy(data + 20, kc_embdex_model, KC_EMBDEX_MODEL_SIZE);
+    kc_embdex_write_u64(data + 52, (uint64_t)record_size);
+    kc_embdex_write_u64(data + 60, (uint64_t)lexical_size);
 
     for (size_t i = 0; i < index->count; i++) {
         size_t id_length = strlen(index->records[i].id);
         size_t content_length = strlen(index->records[i].content);
 
-        kc_semidx_write_u32(data + offset, (uint32_t)id_length);
-        kc_semidx_write_u32(data + offset + 4, (uint32_t)content_length);
+        kc_embdex_write_u32(data + offset, (uint32_t)id_length);
+        kc_embdex_write_u32(data + offset + 4, (uint32_t)content_length);
         offset += 8;
         memcpy(data + offset, index->records[i].id, id_length + 1);
         offset += id_length + 1;
@@ -611,7 +611,7 @@ int kc_semidx_save(const kc_semidx_t *index, const char *path)
         );
         offset += content_length + 1;
         for (size_t j = 0; j < index->dimension; j++) {
-            kc_semidx_write_float(
+            kc_embdex_write_float(
                 data + offset + j * sizeof(float),
                 index->records[i].owned_vector[j]
             );
@@ -621,16 +621,16 @@ int kc_semidx_save(const kc_semidx_t *index, const char *path)
     if (offset != record_size) {
         kc_bm25_free(lexical_bytes);
         free(data);
-        return KC_SEMIDX_EFORMAT;
+        return KC_EMBDEX_EFORMAT;
     }
     memcpy(data + offset, lexical_bytes, lexical_size);
     kc_bm25_free(lexical_bytes);
 
-    status = KC_SEMIDX_EIO;
+    status = KC_EMBDEX_EIO;
     if (kc_mmap_open(&mapping, path) == KC_MMAP_OK) {
         if (kc_mmap_set(mapping, data, size) == KC_MMAP_OK &&
             kc_mmap_save(mapping) == KC_MMAP_OK) {
-            status = KC_SEMIDX_OK;
+            status = KC_EMBDEX_OK;
         }
     }
     kc_mmap_close(mapping);
@@ -645,13 +645,13 @@ int kc_semidx_save(const kc_semidx_t *index, const char *path)
  * @param options Optional search settings.
  * @param out_results Receives the allocated result array.
  * @param out_count Receives the number of results.
- * @return KC_SEMIDX_OK or a negative status code.
+ * @return KC_EMBDEX_OK or a negative status code.
  */
-int kc_semidx_search(
-    const kc_semidx_t *index,
+int kc_embdex_search(
+    const kc_embdex_t *index,
     const char *query,
-    const kc_semidx_search_options_t *options,
-    kc_semidx_result_t **out_results,
+    const kc_embdex_search_options_t *options,
+    kc_embdex_result_t **out_results,
     size_t *out_count
 )
 {
@@ -661,16 +661,16 @@ int kc_semidx_search(
     double threshold = -1.0;
     kc_hnsw_result_t *matches = NULL;
     size_t count = 0;
-    kc_semidx_result_t *results;
-    int status = KC_SEMIDX_EINDEX;
+    kc_embdex_result_t *results;
+    int status = KC_EMBDEX_EINDEX;
 
     if (out_results == NULL || out_count == NULL) {
-        return KC_SEMIDX_EINVAL;
+        return KC_EMBDEX_EINVAL;
     }
     *out_results = NULL;
     *out_count = 0;
     if (index == NULL || query == NULL || index->graph == NULL) {
-        return KC_SEMIDX_EINVAL;
+        return KC_EMBDEX_EINVAL;
     }
     if (options != NULL) {
         if (options->limit != NULL) {
@@ -681,37 +681,37 @@ int kc_semidx_search(
         }
     }
     if (!isfinite(threshold) || threshold < -1.0 || threshold > 1.0) {
-        return KC_SEMIDX_EINVAL;
+        return KC_EMBDEX_EINVAL;
     }
     if (limit > INT_MAX) {
-        return KC_SEMIDX_EINVAL;
+        return KC_EMBDEX_EINVAL;
     }
     if (limit == 0 || index->count == 0) {
-        return KC_SEMIDX_OK;
+        return KC_EMBDEX_OK;
     }
     if (kc_emb_embed(query, &embedding, &dimension) != KC_EMB_OK ||
         dimension != index->dimension) {
         kc_emb_free(embedding);
-        return KC_SEMIDX_EEMBED;
+        return KC_EMBDEX_EEMBED;
     }
     if (kc_hnsw_search(
         index->graph, embedding, limit, threshold, &matches, &count
     ) != KC_HNSW_OK) {
         kc_emb_free(embedding);
-        return KC_SEMIDX_EINDEX;
+        return KC_EMBDEX_EINDEX;
     }
     kc_emb_free(embedding);
     if (count == 0) {
-        return KC_SEMIDX_OK;
+        return KC_EMBDEX_OK;
     }
     if (count > SIZE_MAX / sizeof(*results)) {
         kc_hnsw_free(matches);
-        return KC_SEMIDX_ENOMEM;
+        return KC_EMBDEX_ENOMEM;
     }
-    results = (kc_semidx_result_t *)calloc(count, sizeof(*results));
+    results = (kc_embdex_result_t *)calloc(count, sizeof(*results));
     if (results == NULL) {
         kc_hnsw_free(matches);
-        return KC_SEMIDX_ENOMEM;
+        return KC_EMBDEX_ENOMEM;
     }
     for (size_t i = 0; i < count; i++) {
         char *end;
@@ -728,7 +728,7 @@ int kc_semidx_search(
     *out_results = results;
     *out_count = count;
     kc_hnsw_free(matches);
-    return KC_SEMIDX_OK;
+    return KC_EMBDEX_OK;
 
 failure:
     free(results);
@@ -739,7 +739,7 @@ failure:
 typedef struct {
     size_t ordinal;
     double score;
-} kc_semidx_rank_t;
+} kc_embdex_rank_t;
 
 /**
  * Rank higher scores first, breaking exact ties by document ordinal.
@@ -747,10 +747,10 @@ typedef struct {
  * @param right Second candidate.
  * @return Negative, zero, or positive sort order.
  */
-static int kc_semidx_rank_compare(const void *left, const void *right)
+static int kc_embdex_rank_compare(const void *left, const void *right)
 {
-    const kc_semidx_rank_t *a = (const kc_semidx_rank_t *)left;
-    const kc_semidx_rank_t *b = (const kc_semidx_rank_t *)right;
+    const kc_embdex_rank_t *a = (const kc_embdex_rank_t *)left;
+    const kc_embdex_rank_t *b = (const kc_embdex_rank_t *)right;
 
     if (a->score > b->score) return -1;
     if (a->score < b->score) return 1;
@@ -766,22 +766,22 @@ static int kc_semidx_rank_compare(const void *left, const void *right)
  * @param capacity Maximum number of candidates.
  * @param ordinal Document ordinal.
  * @param score Score to add to the candidate.
- * @return KC_SEMIDX_OK or an error status.
+ * @return KC_EMBDEX_OK or an error status.
  */
-static int kc_semidx_rank_add(kc_semidx_rank_t *ranks,
+static int kc_embdex_rank_add(kc_embdex_rank_t *ranks,
     size_t *count, size_t capacity, size_t ordinal, double score)
 {
     for (size_t i = 0; i < *count; i++) {
         if (ranks[i].ordinal == ordinal) {
             ranks[i].score += score;
-            return KC_SEMIDX_OK;
+            return KC_EMBDEX_OK;
         }
     }
-    if (*count >= capacity) return KC_SEMIDX_EINDEX;
+    if (*count >= capacity) return KC_EMBDEX_EINDEX;
     ranks[*count].ordinal = ordinal;
     ranks[*count].score = score;
     (*count)++;
-    return KC_SEMIDX_OK;
+    return KC_EMBDEX_OK;
 }
 
 /**
@@ -791,17 +791,17 @@ static int kc_semidx_rank_add(kc_semidx_rank_t *ranks,
  * @param query Embedded query vector.
  * @return Cosine similarity, or zero for a zero-length vector.
  */
-static double kc_semidx_cosine(const kc_semidx_t *index,
+static double kc_embdex_cosine(const kc_embdex_t *index,
     size_t ordinal, const float *query)
 {
-    const kc_semidx_record_t *record = &index->records[ordinal];
+    const kc_embdex_record_t *record = &index->records[ordinal];
     double dot = 0.0, query_norm = 0.0, record_norm = 0.0;
 
     for (size_t j = 0; j < index->dimension; j++) {
         double a = (double)query[j];
         double b = record->owned_vector != NULL ?
             (double)record->owned_vector[j] :
-            (double)kc_semidx_read_float(record->encoded + j * sizeof(float));
+            (double)kc_embdex_read_float(record->encoded + j * sizeof(float));
 
         dot += a * b;
         query_norm += a * a;
@@ -826,56 +826,56 @@ static double kc_semidx_cosine(const kc_semidx_t *index,
  * @param options Optional result limit and cosine threshold.
  * @param out_results Receives caller-owned results.
  * @param out_count Receives returned result count.
- * @return KC_SEMIDX_OK or an error status.
+ * @return KC_EMBDEX_OK or an error status.
  */
-int kc_semidx_search_mode(const kc_semidx_t *index,
+int kc_embdex_search_mode(const kc_embdex_t *index,
     const char *query, int mode,
-    const kc_semidx_search_options_t *options,
-    kc_semidx_result_t **out_results, size_t *out_count)
+    const kc_embdex_search_options_t *options,
+    kc_embdex_result_t **out_results, size_t *out_count)
 {
     const size_t default_window = 100;
     kc_bm25_result_t *lexical = NULL;
     kc_hnsw_result_t *semantic = NULL;
-    kc_semidx_rank_t *ranks = NULL;
-    kc_semidx_result_t *results = NULL;
+    kc_embdex_rank_t *ranks = NULL;
+    kc_embdex_result_t *results = NULL;
     float *embedding = NULL;
     kc_bm25_search_options_t lexical_options = {0};
     size_t limit = 10, window, lexical_count = 0, semantic_count = 0;
     size_t rank_count = 0, rank_capacity, dimension = 0, result_count;
     double threshold = -1.0;
-    int status = KC_SEMIDX_OK;
+    int status = KC_EMBDEX_OK;
 
     if (out_results != NULL) *out_results = NULL;
     if (out_count != NULL) *out_count = 0;
     if (index == NULL || query == NULL || out_results == NULL ||
-        out_count == NULL) return KC_SEMIDX_EINVAL;
-    if (mode != KC_SEMIDX_MODE_SEMANTIC &&
-        mode != KC_SEMIDX_MODE_LEXICAL &&
-        mode != KC_SEMIDX_MODE_HYBRID &&
-        mode != KC_SEMIDX_MODE_RERANK)
-        return KC_SEMIDX_EINVAL;
+        out_count == NULL) return KC_EMBDEX_EINVAL;
+    if (mode != KC_EMBDEX_MODE_SEMANTIC &&
+        mode != KC_EMBDEX_MODE_LEXICAL &&
+        mode != KC_EMBDEX_MODE_HYBRID &&
+        mode != KC_EMBDEX_MODE_RERANK)
+        return KC_EMBDEX_EINVAL;
 
-    if (mode == KC_SEMIDX_MODE_SEMANTIC)
-        return kc_semidx_search(index, query, options, out_results, out_count);
+    if (mode == KC_EMBDEX_MODE_SEMANTIC)
+        return kc_embdex_search(index, query, options, out_results, out_count);
 
     if (options != NULL) {
         if (options->limit != NULL) limit = *options->limit;
         if (options->threshold != NULL) threshold = *options->threshold;
     }
     if (limit > INT_MAX || index->lexical == NULL ||
-        (mode != KC_SEMIDX_MODE_LEXICAL &&
+        (mode != KC_EMBDEX_MODE_LEXICAL &&
         (!isfinite(threshold) || threshold < -1.0 || threshold > 1.0)))
-        return KC_SEMIDX_EINVAL;
-    if (limit == 0 || index->count == 0) return KC_SEMIDX_OK;
+        return KC_EMBDEX_EINVAL;
+    if (limit == 0 || index->count == 0) return KC_EMBDEX_OK;
 
     window = limit > default_window ? limit : default_window;
     if (window > index->count) window = index->count;
     if (window > SIZE_MAX / 2 ||
         window * 2 > SIZE_MAX / sizeof(*ranks))
-        return KC_SEMIDX_ENOMEM;
+        return KC_EMBDEX_ENOMEM;
     rank_capacity = window * 2;
-    ranks = (kc_semidx_rank_t *)calloc(rank_capacity, sizeof(*ranks));
-    if (ranks == NULL) return KC_SEMIDX_ENOMEM;
+    ranks = (kc_embdex_rank_t *)calloc(rank_capacity, sizeof(*ranks));
+    if (ranks == NULL) return KC_EMBDEX_ENOMEM;
 
     lexical_options.limit = &window;
     {
@@ -884,42 +884,42 @@ int kc_semidx_search_mode(const kc_semidx_t *index,
 
         if (lexical_status != KC_BM25_OK) {
             status = lexical_status == KC_BM25_ENOMEM ?
-                KC_SEMIDX_ENOMEM : KC_SEMIDX_ELEXICAL;
+                KC_EMBDEX_ENOMEM : KC_EMBDEX_ELEXICAL;
             goto finished;
         }
     }
 
     for (size_t i = 0; i < lexical_count; i++) {
         size_t ordinal = lexical[i].ordinal;
-        double score = mode == KC_SEMIDX_MODE_HYBRID ?
+        double score = mode == KC_EMBDEX_MODE_HYBRID ?
             1.0 / (60.0 + (double)i + 1.0) : lexical[i].score;
 
         if (ordinal >= index->count) {
-            status = KC_SEMIDX_ELEXICAL;
+            status = KC_EMBDEX_ELEXICAL;
             goto finished;
         }
-        status = kc_semidx_rank_add(ranks, &rank_count,
+        status = kc_embdex_rank_add(ranks, &rank_count,
             rank_capacity, ordinal, score);
-        if (status != KC_SEMIDX_OK) goto finished;
+        if (status != KC_EMBDEX_OK) goto finished;
     }
 
-    if (mode == KC_SEMIDX_MODE_RERANK && rank_count == 0)
+    if (mode == KC_EMBDEX_MODE_RERANK && rank_count == 0)
         goto finished;
 
-    if (mode != KC_SEMIDX_MODE_LEXICAL) {
+    if (mode != KC_EMBDEX_MODE_LEXICAL) {
         if (kc_emb_embed(query, &embedding, &dimension) != KC_EMB_OK ||
             dimension != index->dimension)
         {
-            status = KC_SEMIDX_EEMBED;
+            status = KC_EMBDEX_EEMBED;
             goto finished;
         }
     }
 
-    if (mode == KC_SEMIDX_MODE_HYBRID) {
+    if (mode == KC_EMBDEX_MODE_HYBRID) {
         if (kc_hnsw_search(index->graph, embedding, window, threshold,
             &semantic, &semantic_count) != KC_HNSW_OK)
         {
-            status = KC_SEMIDX_EINDEX;
+            status = KC_EMBDEX_EINDEX;
             goto finished;
         }
         for (size_t i = 0; i < semantic_count; i++) {
@@ -929,19 +929,19 @@ int kc_semidx_search_mode(const kc_semidx_t *index,
             if (semantic[i].id[0] == '\0' || *end != '\0' ||
                 ordinal >= index->count)
             {
-                status = KC_SEMIDX_EINDEX;
+                status = KC_EMBDEX_EINDEX;
                 goto finished;
             }
-            status = kc_semidx_rank_add(ranks, &rank_count,
+            status = kc_embdex_rank_add(ranks, &rank_count,
                 rank_capacity, (size_t)ordinal,
                 1.0 / (60.0 + (double)i + 1.0));
-            if (status != KC_SEMIDX_OK) goto finished;
+            if (status != KC_EMBDEX_OK) goto finished;
         }
-    } else if (mode == KC_SEMIDX_MODE_RERANK) {
+    } else if (mode == KC_EMBDEX_MODE_RERANK) {
         size_t kept = 0;
 
         for (size_t i = 0; i < rank_count; i++) {
-            double score = kc_semidx_cosine(index, ranks[i].ordinal,
+            double score = kc_embdex_cosine(index, ranks[i].ordinal,
                 embedding);
 
             if (score < threshold) continue;
@@ -952,16 +952,16 @@ int kc_semidx_search_mode(const kc_semidx_t *index,
         rank_count = kept;
     }
 
-    qsort(ranks, rank_count, sizeof(*ranks), kc_semidx_rank_compare);
+    qsort(ranks, rank_count, sizeof(*ranks), kc_embdex_rank_compare);
     result_count = rank_count < limit ? rank_count : limit;
     if (result_count != 0) {
         if (result_count > SIZE_MAX / sizeof(*results)) {
-            status = KC_SEMIDX_ENOMEM;
+            status = KC_EMBDEX_ENOMEM;
             goto finished;
         }
-        results = (kc_semidx_result_t *)calloc(result_count, sizeof(*results));
+        results = (kc_embdex_result_t *)calloc(result_count, sizeof(*results));
         if (results == NULL) {
-            status = KC_SEMIDX_ENOMEM;
+            status = KC_EMBDEX_ENOMEM;
             goto finished;
         }
         for (size_t i = 0; i < result_count; i++) {
@@ -977,7 +977,7 @@ int kc_semidx_search_mode(const kc_semidx_t *index,
     results = NULL;
 
 finished:
-    kc_semidx_free(results);
+    kc_embdex_free(results);
     kc_hnsw_free(semantic);
     kc_bm25_free(lexical);
     kc_emb_free(embedding);
@@ -990,7 +990,7 @@ finished:
  * @param index Index or NULL.
  * @return Number of records, or zero for NULL.
  */
-size_t kc_semidx_count(const kc_semidx_t *index)
+size_t kc_embdex_count(const kc_embdex_t *index)
 {
     return index == NULL ? 0 : index->count;
 }
@@ -1000,7 +1000,7 @@ size_t kc_semidx_count(const kc_semidx_t *index)
  * @param ptr Result allocation or NULL.
  * @return void
  */
-void kc_semidx_free(void *ptr)
+void kc_embdex_free(void *ptr)
 {
     free(ptr);
 }
@@ -1010,7 +1010,7 @@ void kc_semidx_free(void *ptr)
  * @param index Index handle or NULL.
  * @return void
  */
-void kc_semidx_close(kc_semidx_t *index)
+void kc_embdex_close(kc_embdex_t *index)
 {
     if (index == NULL) {
         return;
@@ -1036,26 +1036,26 @@ void kc_semidx_close(kc_semidx_t *index)
  * @param status Status to describe.
  * @return Static text.
  */
-const char *kc_semidx_strerror(int status)
+const char *kc_embdex_strerror(int status)
 {
     switch (status) {
-        case KC_SEMIDX_OK:
+        case KC_EMBDEX_OK:
             return "success";
-        case KC_SEMIDX_EINVAL:
+        case KC_EMBDEX_EINVAL:
             return "invalid argument";
-        case KC_SEMIDX_ENOMEM:
+        case KC_EMBDEX_ENOMEM:
             return "out of memory";
-        case KC_SEMIDX_EIO:
+        case KC_EMBDEX_EIO:
             return "file I/O error";
-        case KC_SEMIDX_EFORMAT:
+        case KC_EMBDEX_EFORMAT:
             return "incompatible or invalid index";
-        case KC_SEMIDX_EEMBED:
+        case KC_EMBDEX_EEMBED:
             return "embedding failed";
-        case KC_SEMIDX_EINDEX:
+        case KC_EMBDEX_EINDEX:
             return "vector index failed";
-        case KC_SEMIDX_ESTATE:
+        case KC_EMBDEX_ESTATE:
             return "index cannot be saved in its current state";
-        case KC_SEMIDX_ELEXICAL:
+        case KC_EMBDEX_ELEXICAL:
             return "lexical index failed";
         default:
             return "unknown error";
@@ -1066,7 +1066,7 @@ const char *kc_semidx_strerror(int status)
  * Return the build timestamp for this library.
  * @return Build timestamp.
  */
-uint64_t kc_semidx_version(void)
+uint64_t kc_embdex_version(void)
 {
-    return (uint64_t)KC_SEMIDX_BUILD_VERSION;
+    return (uint64_t)KC_EMBDEX_BUILD_VERSION;
 }

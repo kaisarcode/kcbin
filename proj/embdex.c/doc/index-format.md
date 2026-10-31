@@ -1,6 +1,6 @@
 # Binary index
 
-A semidx index is one portable binary value containing the source
+A embdex index is one portable binary value containing the source
 associations, stored embedding vectors, and the BM25 inverted index.
 It uses one file and one libmmap instance.
 
@@ -18,13 +18,13 @@ identity used internally across both ranking engines.
 
 The trailing BM25 section uses the portable memory representation
 exported by libbm25. It contains its analyzer configuration, document
-statistics, vocabulary, and postings. semidx validates the section
+statistics, vocabulary, and postings. embdex validates the section
 bounds and format before accepting a saved index. The data stored in
 both sections belongs to the same ordered corpus.
 
 ## Memory and persistence
 
-semidx uses libmmap to open the complete file as one value. The source
+embdex uses libmmap to open the complete file as one value. The source
 associations and embeddings are accessed from the mapped data.
 libbm25 imports the embedded BM25 section directly from the mapped
 bytes without re-tokenizing the document corpus; its current import API
@@ -42,4 +42,4 @@ Applications need platform-matched kclib artifacts when building.
 
 ## Next step
 
-Return to the [semidx README](../README.md).
+Return to the [embdex README](../README.md).

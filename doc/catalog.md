@@ -6,7 +6,7 @@ This is the canonical inventory of kcbin projects. Every entry links to the owni
 
 | Project | Purpose |
 | :--- | :--- |
-| [semidx](../proj/semidx/README.md) | Builds portable binary semantic indexes from text associations and retrieves relevant matches. |
+| [embdex](../proj/embdex/README.md) | Builds portable binary semantic indexes from text associations and retrieves relevant matches. |
 
 ## Next step
 

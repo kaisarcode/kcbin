@@ -1,5 +1,5 @@
 ## Makefile
-## Summary: Cross-compiles semidx using precompiled target-matched kclibs.
+## Summary: Cross-compiles embdex using precompiled target-matched kclibs.
 ##
 ## Author:  KaisarCode
 ## Website: https://kaisarcode.com
@@ -87,7 +87,7 @@ define windows_target
 windows/$(1):
 	@$(MAKE) -s --no-print-directory build-target TARGET=windows/$(1) \
 		TARGET_CC="$(2)" TARGET_CXX="$(3)" TARGET_AR="$(4)" TARGET_EXT=dll TARGET_CFLAGS="" \
-		TARGET_SHARED="-shared -Wl,--out-implib,$(BIN_DIR)/windows/$(1)/libsemidx.dll.a" \
+		TARGET_SHARED="-shared -Wl,--out-implib,$(BIN_DIR)/windows/$(1)/libembdex.dll.a" \
 		TARGET_CLI_EXT=.exe TARGET_SYSTEM_LIBS="-lm"
 endef
 
@@ -100,7 +100,7 @@ macos/$(1):
 		TARGET_CC="$(OSXCROSS_ROOT)/bin/$(2)" \
 		TARGET_CXX="$(OSXCROSS_ROOT)/bin/$(3)" TARGET_AR="$(4)" TARGET_EXT=dylib \
 		TARGET_CFLAGS="-fPIC" TARGET_SYSTEM_LIBS="-lm" \
-		TARGET_SHARED="-dynamiclib -Wl,-install_name,@rpath/libsemidx.dylib"
+		TARGET_SHARED="-dynamiclib -Wl,-install_name,@rpath/libembdex.dylib"
 endef
 
 $(eval $(call macos_target,x86_64,o64-clang,o64-clang++,$(OSXCROSS_X86_64_AR)))
@@ -124,7 +124,7 @@ wasm/wasm32:
 		TARGET_CC="$(WASM_EMCC)" TARGET_CXX="$(WASM_EMCXX)" \
 		TARGET_AR="$(WASM_EMAR)" \
 		TARGET_EXT=wasm TARGET_CFLAGS="" TARGET_SYSTEM_LIBS="-lm" \
-		TARGET_SHARED="--no-entry -sSTANDALONE_WASM=1 -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 -sEXPORTED_FUNCTIONS=_kc_semidx_build,_kc_semidx_open,_kc_semidx_save,_kc_semidx_search,_kc_semidx_search_mode,_kc_semidx_count,_kc_semidx_free,_kc_semidx_close,_kc_semidx_strerror,_kc_semidx_version"
+		TARGET_SHARED="--no-entry -sSTANDALONE_WASM=1 -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 -sEXPORTED_FUNCTIONS=_kc_embdex_build,_kc_embdex_open,_kc_embdex_save,_kc_embdex_search,_kc_embdex_search_mode,_kc_embdex_count,_kc_embdex_free,_kc_embdex_close,_kc_embdex_strerror,_kc_embdex_version"
 
 DEP_EMB = $(KCDIST_DIR)/libemb.c/$(TARGET)
 DEP_HNSW = $(KCDIST_DIR)/libhnsw.c/$(TARGET)
@@ -141,19 +141,19 @@ DEP_HEADERS = $(DEP_EMB)/libemb.h \
 DEP_INCLUDES = $(addprefix -I,$(DEP_DIRS))
 DEP_LINKS = $(DEP_LIBS) $(TARGET_SYSTEM_LIBS)
 OUT_DIR = $(BIN_DIR)/$(TARGET)
-OUT_SHARED = $(OUT_DIR)/libsemidx.$(TARGET_EXT)
-OUT_STATIC = $(OUT_DIR)/libsemidx.a
-OUT_CLI = $(OUT_DIR)/semidx$(TARGET_CLI_EXT)
-OUT_OBJECT = $(BUILD_DIR)/$(TARGET)/libsemidx.o
+OUT_SHARED = $(OUT_DIR)/libembdex.$(TARGET_EXT)
+OUT_STATIC = $(OUT_DIR)/libembdex.a
+OUT_CLI = $(OUT_DIR)/embdex$(TARGET_CLI_EXT)
+OUT_OBJECT = $(BUILD_DIR)/$(TARGET)/libembdex.o
 TARGET_PRODUCT = $(if $(filter wasm/%,$(TARGET)),$(OUT_SHARED),$(OUT_CLI))
 
 check-deps:
-	@test -n "$(KCDIST_DIR)" || { echo "semidx: set KCDIST_DIR to the precompiled kclib distribution" >&2; exit 1; }
-	@command -v "$(TARGET_CC)" >/dev/null 2>&1 || { echo "semidx: missing target compiler $(TARGET_CC)" >&2; exit 1; }
-	@command -v "$(TARGET_CXX)" >/dev/null 2>&1 || { echo "semidx: missing target C++ linker $(TARGET_CXX)" >&2; exit 1; }
-	@command -v "$(TARGET_AR)" >/dev/null 2>&1 || { echo "semidx: missing target archiver $(TARGET_AR)" >&2; exit 1; }
+	@test -n "$(KCDIST_DIR)" || { echo "embdex: set KCDIST_DIR to the precompiled kclib distribution" >&2; exit 1; }
+	@command -v "$(TARGET_CC)" >/dev/null 2>&1 || { echo "embdex: missing target compiler $(TARGET_CC)" >&2; exit 1; }
+	@command -v "$(TARGET_CXX)" >/dev/null 2>&1 || { echo "embdex: missing target C++ linker $(TARGET_CXX)" >&2; exit 1; }
+	@command -v "$(TARGET_AR)" >/dev/null 2>&1 || { echo "embdex: missing target archiver $(TARGET_AR)" >&2; exit 1; }
 	@for path in $(DEP_LIBS) $(DEP_HEADERS); do \
-		test -f "$$path" || { echo "semidx: missing dependency for $(TARGET): $$path" >&2; exit 1; }; \
+		test -f "$$path" || { echo "embdex: missing dependency for $(TARGET): $$path" >&2; exit 1; }; \
 	done
 
 build-target: check-deps
@@ -167,11 +167,11 @@ build-target: check-deps
 		KCDIST_DIR="$(KCDIST_DIR)" BUILD_VERSION="$(BUILD_VERSION)"
 	@echo "OK $(TARGET)"
 
-$(OUT_OBJECT): src/libsemidx.c src/libsemidx.h Makefile $(DEP_HEADERS)
+$(OUT_OBJECT): src/libembdex.c src/libembdex.h Makefile $(DEP_HEADERS)
 	@mkdir -p "$(dir $@)"
 	@$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror $(TARGET_CFLAGS) \
-		-DKC_SEMIDX_BUILD_VERSION=$(BUILD_VERSION) -Isrc $(DEP_INCLUDES) \
-		-c -o "$@" src/libsemidx.c
+		-DKC_EMBDEX_BUILD_VERSION=$(BUILD_VERSION) -Isrc $(DEP_INCLUDES) \
+		-c -o "$@" src/libembdex.c
 
 $(OUT_STATIC): $(OUT_OBJECT)
 	@mkdir -p "$(OUT_DIR)"
@@ -181,18 +181,18 @@ $(OUT_SHARED): $(OUT_OBJECT) $(DEP_LIBS)
 	@mkdir -p "$(OUT_DIR)"
 	@$(TARGET_CXX) $(TARGET_SHARED) -o "$@" "$(OUT_OBJECT)" $(DEP_LINKS)
 
-$(OUT_CLI): src/semidx.c src/libsemidx.h $(OUT_STATIC) $(OUT_SHARED) $(DEP_LIBS)
+$(OUT_CLI): src/embdex.c src/libembdex.h $(OUT_STATIC) $(OUT_SHARED) $(DEP_LIBS)
 	@mkdir -p "$(BUILD_DIR)/$(TARGET)"
 	@$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
-		-c -o "$(BUILD_DIR)/$(TARGET)/semidx.o" src/semidx.c
-	@$(TARGET_CXX) -o "$@" "$(BUILD_DIR)/$(TARGET)/semidx.o" \
+		-c -o "$(BUILD_DIR)/$(TARGET)/embdex.o" src/embdex.c
+	@$(TARGET_CXX) -o "$@" "$(BUILD_DIR)/$(TARGET)/embdex.o" \
 		"$(OUT_STATIC)" $(DEP_LINKS)
 
-$(BUILD_DIR)/test/semidx-test: src/test.c src/libsemidx.h $(BIN_DIR)/$(NATIVE_TARGET)/libsemidx.$(NATIVE_EXT)
+$(BUILD_DIR)/test/embdex-test: src/test.c src/libembdex.h $(BIN_DIR)/$(NATIVE_TARGET)/libembdex.$(NATIVE_EXT)
 	@mkdir -p "$(BUILD_DIR)/test"
 	@$(CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
 		-o "$@" src/test.c -L"$(BIN_DIR)/$(NATIVE_TARGET)" \
-		-lsemidx
+		-lembdex
 
 test:
 	@if [ -n "$(filter wasm,$(MAKECMDGOALS))" ]; then \
@@ -208,16 +208,16 @@ test:
 		$(MAKE) -s --no-print-directory wasm/wasm32 || exit 1; \
 		mkdir -p "$(BUILD_DIR)/test-wasm" || exit 1; \
 		"$(WASM_EMCC)" -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
-			-c -o "$(BUILD_DIR)/test-wasm/semidx-test.o" src/test.c || exit 1; \
-		"$(WASM_EMCXX)" -o "$(BUILD_DIR)/test-wasm/semidx-test.js" \
-			"$(BUILD_DIR)/test-wasm/semidx-test.o" \
-			"$(BIN_DIR)/wasm/wasm32/libsemidx.a" \
+			-c -o "$(BUILD_DIR)/test-wasm/embdex-test.o" src/test.c || exit 1; \
+		"$(WASM_EMCXX)" -o "$(BUILD_DIR)/test-wasm/embdex-test.js" \
+			"$(BUILD_DIR)/test-wasm/embdex-test.o" \
+			"$(BIN_DIR)/wasm/wasm32/libembdex.a" \
 			"$(KCDIST_DIR)/libemb.c/wasm/wasm32/libemb.a" \
 			"$(KCDIST_DIR)/libhnsw.c/wasm/wasm32/libhnsw.a" \
 			"$(KCDIST_DIR)/libbm25.c/wasm/wasm32/libbm25.a" \
 			"$(KCDIST_DIR)/libmmap.c/wasm/wasm32/libmmap.a" \
 			-lm -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 || exit 1; \
-		(cd "$(BUILD_DIR)/test-wasm" && "$$node" semidx-test.js all); \
+		(cd "$(BUILD_DIR)/test-wasm" && "$$node" embdex-test.js all); \
 	elif [ -n "$(filter wine,$(MAKECMDGOALS))" ]; then \
 		if ! command -v "$(WINE)" >/dev/null 2>&1; then \
 			echo "Missing Wine runtime: $(WINE)" >&2; exit 1; \
@@ -226,7 +226,7 @@ test:
 			! command -v "$(WINE_X86_64_CXX)" >/dev/null 2>&1; then \
 			echo "Missing Windows cross-compilers" >&2; exit 1; \
 		fi; \
-		for file in libsemidx.dll libsemidx.dll.a semidx.exe; do \
+		for file in libembdex.dll libembdex.dll.a embdex.exe; do \
 			if [ ! -f "$(BIN_DIR)/windows/x86_64/$$file" ]; then \
 				echo "Missing Windows artifact: $$file; run make windows/x86_64" >&2; \
 				exit 1; \
@@ -234,11 +234,11 @@ test:
 		done; \
 		mkdir -p "$(BUILD_DIR)/test-wine" || exit 1; \
 		"$(WINE_X86_64_CC)" -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
-			-o "$(BUILD_DIR)/test-wine/semidx-test.exe" src/test.c \
-			-L"$(BIN_DIR)/windows/x86_64" -lsemidx \
+			-o "$(BUILD_DIR)/test-wine/embdex-test.exe" src/test.c \
+			-L"$(BIN_DIR)/windows/x86_64" -lembdex \
 			|| exit 1; \
-		cp "$(BIN_DIR)/windows/x86_64/libsemidx.dll" \
-			"$(BIN_DIR)/windows/x86_64/semidx.exe" \
+		cp "$(BIN_DIR)/windows/x86_64/libembdex.dll" \
+			"$(BIN_DIR)/windows/x86_64/embdex.exe" \
 			"$(BUILD_DIR)/test-wine/" || exit 1; \
 		for dll in \
 			"$$($(WINE_X86_64_CC) -print-file-name=libgcc_s_seh-1.dll)" \
@@ -249,16 +249,16 @@ test:
 			fi; \
 		done; \
 		(cd "$(BUILD_DIR)/test-wine" && \
-			EGL_LOG_LEVEL=fatal WINEDEBUG=-all "$(WINE)" semidx-test.exe all); \
+			EGL_LOG_LEVEL=fatal WINEDEBUG=-all "$(WINE)" embdex-test.exe all); \
 	else \
 		$(MAKE) -s --no-print-directory $(NATIVE_TARGET) || exit 1; \
-		$(MAKE) -s --no-print-directory "$(BUILD_DIR)/test/semidx-test" || exit 1; \
-		cp "$(BIN_DIR)/$(NATIVE_TARGET)/semidx$(TARGET_CLI_EXT)" \
+		$(MAKE) -s --no-print-directory "$(BUILD_DIR)/test/embdex-test" || exit 1; \
+		cp "$(BIN_DIR)/$(NATIVE_TARGET)/embdex$(TARGET_CLI_EXT)" \
 			"$(BUILD_DIR)/test/" || exit 1; \
 		(cd "$(BUILD_DIR)/test" && \
 			LD_LIBRARY_PATH="$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET):$$LD_LIBRARY_PATH" \
 			DYLD_LIBRARY_PATH="$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET):$$DYLD_LIBRARY_PATH" \
-			./semidx-test all); \
+			./embdex-test all); \
 	fi
 
 wine:

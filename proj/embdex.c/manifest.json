@@ -1,10 +1,10 @@
 {
-  "name": "semidx",
+  "name": "embdex",
   "description": "Indexes text associations for semantic, lexical, hybrid, and reranked search.",
   "author": "KaisarCode",
   "license": "LGPL-3.0-only",
   "website": "https://kaisarcode.com",
-  "repository": "https://github.com/kaisarcode/kcbin/tree/master/proj/semidx",
+  "repository": "https://github.com/kaisarcode/kcbin/tree/master/proj/embdex",
   "level": 1,
   "dependencies": [
     "libemb",

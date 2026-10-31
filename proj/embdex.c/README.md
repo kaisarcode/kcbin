@@ -1,6 +1,6 @@
-# semidx - Semantic text indexing
+# embdex - Semantic text indexing
 
-semidx builds portable indexes from text associations and searches them using
+embdex builds portable indexes from text associations and searches them using
 semantic embeddings, BM25 lexical ranking, or both. Each entry has an ID and
 text content. IDs may repeat, and each association remains independently
 searchable. Indexes work locally without a database or server.
@@ -11,14 +11,14 @@ Build an index from tab-separated ID and content lines:
 
 ```sh
 printf 'smile\tLaughter, joy, humor and something funny\n' |
-    semidx build icons.bin
+    embdex build icons.bin
 ```
 
 Search the saved index:
 
 ```sh
-semidx search icons.bin "that made me laugh"
-semidx search icons.bin "smile" --mode hybrid
+embdex search icons.bin "that made me laugh"
+embdex search icons.bin "smile" --mode hybrid
 ```
 
 Results are tab-separated lines containing ID, score, and original content.
@@ -31,23 +31,23 @@ cosine similarity for BM25-selected candidates.
 An application can pass an in-memory array of associations directly:
 
 ```c
-#include "libsemidx.h"
+#include "libembdex.h"
 
-kc_semidx_document_t corpus[] = {
+kc_embdex_document_t corpus[] = {
     {"document", "Authentication between peers"},
     {"document", "Exchanging public keys"}
 };
-kc_semidx_t *index = NULL;
-kc_semidx_result_t *results = NULL;
+kc_embdex_t *index = NULL;
+kc_embdex_result_t *results = NULL;
 size_t count = 0;
 
-if (kc_semidx_build(&index, corpus, 2) == KC_SEMIDX_OK) {
-    kc_semidx_save(index, "corpus.bin");
-    if (kc_semidx_search(index, "secure connections", NULL,
-        &results, &count) == KC_SEMIDX_OK) {
-        kc_semidx_free(results);
+if (kc_embdex_build(&index, corpus, 2) == KC_EMBDEX_OK) {
+    kc_embdex_save(index, "corpus.bin");
+    if (kc_embdex_search(index, "secure connections", NULL,
+        &results, &count) == KC_EMBDEX_OK) {
+        kc_embdex_free(results);
     }
-    kc_semidx_close(index);
+    kc_embdex_close(index);
 }
 ```
 
@@ -83,22 +83,22 @@ scripts to generate artifact checksums and publish the project:
 
 ```sh
 export KCDIST_DIR="$HOME/kclib/dist"
-./scripts/build.sh semidx
-./scripts/test.sh semidx
-./scripts/dist.sh semidx
+./scripts/build.sh embdex
+./scripts/test.sh embdex
+./scripts/dist.sh embdex
 ```
 
-The distribution script publishes only semidx artifacts and metadata to the
+The distribution script publishes only embdex artifacts and metadata to the
 shared distribution root. It never compiles or copies the dependent kclibs.
 All targets link against the target-matched precompiled `libemb.a`,
 `libhnsw.a`, `libbm25.a`, and `libmmap.a` from `KCDIST_DIR`; no separate kclib shared
-libraries are required at runtime. Every target also produces `libsemidx.a`
+libraries are required at runtime. Every target also produces `libembdex.a`
 alongside its existing shared library or WASM module. This static archive
-contains semidx's C code; applications linking it must also link the three
+contains embdex's C code; applications linking it must also link the three
 precompiled kclib archives, using a C++ linker for the GGML code in `libemb`.
-The WASM build produces `libsemidx.wasm` and `libsemidx.a`.
-Native CLI executables are linked with `libsemidx.a` and the four kclib
-static archives, so they do not need `libsemidx.so` or kclib shared libraries
+The WASM build produces `libembdex.wasm` and `libembdex.a`.
+Native CLI executables are linked with `libembdex.a` and the four kclib
+static archives, so they do not need `libembdex.so` or kclib shared libraries
 at runtime. The shared library is still published for other consumers.
 
 ## Documentation
