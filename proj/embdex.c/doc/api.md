@@ -85,21 +85,50 @@ Search automatically combines independent candidate discovery:
 - libemb obtains one embedding for queries requiring semantic retrieval.
     Cosine similarity scans small indexes directly; HNSW handles larger ones.
 
-All evidence is accumulated under the internal document ordinal. Exact
-phrase coverage, distinct matched query positions, spelling uncertainty,
-lexical rank and cosine similarity determine which associations survive
-selection and their ordering. Coverage uses corpus-relative term rarity,
-so common words contribute less than distinctive terms. A candidate can be discovered by any
-mechanism without first passing another mechanism's filter.
+All evidence is accumulated under the internal document ordinal.
+The engine first decides whether the evidence is sufficient, then ranks
+only accepted associations. BM25 supplies discovery order; a BM25 hit
+alone cannot turn an unrelated association into an accepted result.
+
+Lexical coverage is weighted by the rarity of the original normalized
+query words. Terms absent from the index are assigned singleton rarity
+rather than an artificial maximum. Approximate matches do not alter
+the document frequency of the original term, and repeated evidence
+for one query position is counted once.
+
+A complete phrase, strong multi-term lexical coverage, unusually strong
+semantic similarity, or sufficiently corroborated semantic similarity
+can justify accepting a candidate. Weak lexical coverage cannot bypass
+the query-relative semantic threshold. The relative threshold comes
+from a bounded sample of the corpus, and no search mode is exposed.
 
 For a single requested result, a complete normalized phrase match can
-avoid model inference. Independent semantic candidates must pass both an
-absolute similarity floor and a threshold relative to the query's similarity
-to a bounded sample of indexed associations. Queries with no sufficient
-evidence can return no results, even when the vector index has a nearest
-neighbor. The current
-confidence thresholds and score weights are implementation policy, not
-independently validated quality guarantees for every dataset.
+avoid model inference. Queries with insufficient evidence can return
+no results. These rules still cannot guarantee correct interpretation
+of contradictions or negations, and the quality of the embedding model
+strongly affects paraphrase retrieval, particularly in Spanish.
+
+The current acceptance boundaries and score weights are provisional
+implementation policy. They require validation against positive and
+negative queries; the diagnostic trace is available for that purpose.
+
+### Diagnostic trace
+
+Set `KC_EMBDEX_TRACE` to a writable JSON Lines file to append the
+evidence of every association considered by each search:
+
+```sh
+KC_EMBDEX_TRACE=/tmp/embdex-trace.jsonl \
+    embdex search corpus.bin "peer authentication" --limit 5
+```
+
+The opt-in trace includes corpus ordinals, IDs, original content,
+bitmasks of lexical and phrase matches, BM25 ranks, measured cosine
+similarities, weighted coverage, acceptance reasons, scores and ranks
+before result-limit truncation. It is intended for benchmarks, not
+production logging: it includes source text and queries, and is appended
+to the specified file. Failure to write diagnostics does not affect
+search results. It does not add a public API operation.
 
 The index stores normalized terms and postings inside BM25's persistent
 section. Search builds temporary word coverage and phrase evidence only
