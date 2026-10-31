@@ -26,18 +26,19 @@ embdex search icons.bin "smile" --limit 5
 
 Output is tab-separated: ID, ranking score, and original content.
 
-A map can be compiled with a domain-specific dictionary:
+A map can be compiled from a dataset and multiple independent dictionaries:
 
 ```sh
-KC_EMBDEX_WORDMAP=es-ar-security.tsv \
-    embdex build security-es-ar.bin -i security-es-ar.tsv
-embdex search security-es-ar.bin "guardar mis claves"
+embdex build mapa.bin -i asociaciones.tsv \
+    -d spanish.tsv -d rioplatense.tsv
+embdex search mapa.bin "guardar mis claves"
 ```
 
-The binary preserves original associations and includes its own dictionary,
-normalized lexical index and vectors. Queries require only the compiled map;
-applications can maintain separate maps by domain, language or regional
-variant without configuring a global dictionary.
+Dictionaries contain word-to-word replacements, including alternative
+replacements for the same word. The binary embeds their merged contents,
+the original associations, and the precomputed retrieval structures.
+Search only needs the map; it does not load the input TSV files or
+interpret language or regional metadata.
 
 ## Native library
 
