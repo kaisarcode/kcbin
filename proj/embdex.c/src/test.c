@@ -449,11 +449,45 @@ static int kc_test_cli(void)
         KC_TEST_CLI " search embdex-cli-index.bin authentication "
         "--mode hybrid > " KC_TEST_NULL " 2>&1"
     ) == 0;
+    file = fopen("embdex-cli-dict-a.tsv", "w");
+    if (file == NULL) failed = 1;
+    else {
+        failed |= fputs("authentication\tverification\n", file) == EOF;
+        failed |= fclose(file) != 0;
+    }
+    file = fopen("embdex-cli-dict-b.tsv", "w");
+    if (file == NULL) failed = 1;
+    else {
+        failed |= fputs("remote\tdistant\n", file) == EOF;
+        failed |= fclose(file) != 0;
+    }
+    if (!failed) failed |= system(
+        KC_TEST_CLI " build embdex-cli-index.bin "
+        "-i embdex-cli-input.tsv -d embdex-cli-dict-a.tsv "
+        "--dictionary embdex-cli-dict-b.tsv > " KC_TEST_NULL " 2>&1"
+    ) != 0;
+    remove("embdex-cli-dict-a.tsv");
+    remove("embdex-cli-dict-b.tsv");
+    if (!failed) failed |= system(
+        KC_TEST_CLI " search embdex-cli-index.bin "
+        "\"verification distant peers\" --limit 2 "
+        "> embdex-cli-output.tsv 2>&1"
+    ) != 0;
+    found = 0;
+    file = fopen("embdex-cli-output.tsv", "r");
+    if (file == NULL) failed = 1;
+    else {
+        while (fgets(line, sizeof(line), file) != NULL)
+            found |= strstr(line, "shared\t") == line;
+        failed |= ferror(file) != 0;
+        failed |= fclose(file) != 0;
+    }
+    failed |= !found;
     remove("embdex-cli-input.tsv");
     remove("embdex-cli-index.bin");
     remove("embdex-cli-output.tsv");
     return kc_test_result("cli",
-        "builds and searches TSV with automatic strategy", failed);
+        "builds, merges dictionary TSVs and searches compiled maps", failed);
 }
 #endif
 
