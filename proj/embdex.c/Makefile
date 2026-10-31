@@ -130,14 +130,19 @@ DEP_EMB = $(KCDIST_DIR)/libemb.c/$(TARGET)
 DEP_HNSW = $(KCDIST_DIR)/libhnsw.c/$(TARGET)
 DEP_BM25 = $(KCDIST_DIR)/libbm25.c/$(TARGET)
 DEP_MMAP = $(KCDIST_DIR)/libmmap.c/$(TARGET)
-DEP_DIRS = $(DEP_EMB) $(DEP_HNSW) $(DEP_BM25) $(DEP_MMAP)
+DEP_NGRAM = $(KCDIST_DIR)/libngram.c/$(TARGET)
+DEP_LEVEN = $(KCDIST_DIR)/libleven.c/$(TARGET)
+DEP_DIRS = $(DEP_EMB) $(DEP_HNSW) $(DEP_BM25) $(DEP_MMAP) $(DEP_NGRAM) $(DEP_LEVEN)
 DEP_LIBS = $(DEP_EMB)/libemb.a \
     $(DEP_HNSW)/libhnsw.a \
     $(DEP_BM25)/libbm25.a \
-    $(DEP_MMAP)/libmmap.a
+    $(DEP_MMAP)/libmmap.a \
+    $(DEP_NGRAM)/libngram.a \
+    $(DEP_LEVEN)/libleven.a
 DEP_HEADERS = $(DEP_EMB)/libemb.h \
     $(DEP_HNSW)/libhnsw.h $(DEP_BM25)/libbm25.h \
-    $(DEP_MMAP)/libmmap.h
+    $(DEP_MMAP)/libmmap.h \
+    $(DEP_NGRAM)/libngram.h $(DEP_LEVEN)/libleven.h
 DEP_INCLUDES = $(addprefix -I,$(DEP_DIRS))
 DEP_LINKS = $(DEP_LIBS) $(TARGET_SYSTEM_LIBS)
 OUT_DIR = $(BIN_DIR)/$(TARGET)
