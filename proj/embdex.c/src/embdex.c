@@ -289,12 +289,6 @@ static int embdex_search(const char *path, const char *query, size_t limit)
     return fflush(stdout) == 0 ? 0 : 1;
 }
 
-
- * Dispatch the semantic index CLI commands.
- * @param argc Number of command-line arguments.
- * @param argv Command-line argument vector.
- * @return Process exit status.
- */
 /**
  * Dispatch the CLI operations on persistent indexes.
  * @param argc Argument count.
