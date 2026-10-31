@@ -1,41 +1,44 @@
 # Binary index
 
-The saved index contains the source associations and their embeddings, allowing
-a different process to open and query it without access to the original corpus.
-The application can copy the file to another machine with compatible binaries.
+A semidx index is one portable binary value containing the source
+associations, stored embedding vectors, and the BM25 inverted index.
+It uses one file and one libmmap instance.
 
 ## Format
 
-The version-1 file is one little-endian binary value. A fixed-size header
-contains its magic signature, format version, vector dimension, association
-count, and model identity. Each record then stores its ID length, content
-length, NUL-terminated ID, NUL-terminated content, and a sequence of 32-bit
-IEEE 754 embedding values.
+The file is a little-endian binary value with a 68-byte header.
+The header contains the magic signature, vector
+dimension, document count, model identity, and the offset and length
+of the BM25 section.
 
-IDs are not unique and no application-defined ordering is imposed on search
-results. The file stores every association independently.
+Each document record stores its ID and content lengths, NUL-terminated
+ID and content, followed by its vector as IEEE 754 single-precision
+values. Public IDs may repeat; the source ordinal is the document
+identity used internally across both ranking engines.
 
-Opening validates the format version, model identity, vector dimension,
-record bounds, string terminators and floating-point values. An incompatible
-or damaged index is rejected.
+The trailing BM25 section uses the portable memory representation
+exported by libbm25. It contains its analyzer configuration, document
+statistics, vocabulary, and postings. semidx validates the section
+bounds and format before accepting a saved index. The data stored in
+both sections belongs to the same ordered corpus.
 
 ## Memory and persistence
 
-semidx uses `libmmap` to open the binary file as mapped read-only storage.
-The source strings are read directly from the mapping. `libhnsw` currently
-requires its own vector and graph storage in RAM, so opening the file rebuilds
-the graph from the persisted vectors without generating embeddings again.
+semidx uses libmmap to open the complete file as one value. The source
+associations and embeddings are accessed from the mapped data.
+libbm25 imports the embedded BM25 section directly from the mapped
+bytes without re-tokenizing the document corpus; its current import API
+allocates the internal dictionary, postings, and document storage.
+libhnsw reconstructs its graph from the saved embedding vectors,
+without running the embedding model again.
 
-The graph is not currently serialized. Index opening therefore has a build
-cost, and searches operate on the HNSW graph in memory.
+Saving writes the combined value through libmmap. It replaces the
+existing destination and is not an atomic transaction; readers must
+not concurrently access the file being replaced. For safe publication,
+write a separate destination and switch consumers after completion.
 
-Saving uses the existing `libmmap` replacement operation. It overwrites
-the destination and is not an atomic transaction. Do not overwrite an index
-while another process is reading it. For a new version, write a separate file
-and switch consumers only after it is complete.
-
-The index file does not package the executable or its shared dependencies.
-All linked libraries must be available for the target platform at runtime.
+The index does not contain executable binaries or runtime libraries.
+Applications need platform-matched kclib artifacts when building.
 
 ## Next step
 

@@ -9,6 +9,7 @@
 
 #include "libsemidx.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,9 +23,9 @@
 #endif
 
 #ifdef __EMSCRIPTEN__
-static int semidx_test_total = 3;
+static int semidx_test_total = 7;
 #else
-static int semidx_test_total = 4;
+static int semidx_test_total = 8;
 #endif
 static int semidx_test_current = 0;
 
@@ -128,6 +129,29 @@ static int semidx_test_persistence(void)
             failed |= results[i].content == NULL;
         }
         failed |= kc_semidx_save(opened, path) != KC_SEMIDX_ESTATE;
+        kc_semidx_free(results);
+        results = NULL;
+        failed |= kc_semidx_search_mode(opened, "laughter",
+            KC_SEMIDX_MODE_LEXICAL, NULL, &results, &count) != KC_SEMIDX_OK;
+        failed |= count != 1 || results == NULL;
+        if (results != NULL && count == 1)
+            failed |= strcmp(results[0].id, "laugh") != 0;
+        kc_semidx_free(results);
+        results = NULL;
+        failed |= kc_semidx_search_mode(opened, "laughter",
+            KC_SEMIDX_MODE_HYBRID, NULL, &results, &count) != KC_SEMIDX_OK;
+        failed |= count != 2 || results == NULL;
+        if (results != NULL && count == 2)
+            failed |= strcmp(results[0].id, "laugh") != 0;
+        kc_semidx_free(results);
+        results = NULL;
+        failed |= kc_semidx_search_mode(opened, "laughter",
+            KC_SEMIDX_MODE_RERANK, NULL, &results, &count) != KC_SEMIDX_OK;
+        failed |= count != 1 || results == NULL;
+        if (results != NULL && count == 1) {
+            failed |= strcmp(results[0].id, "laugh") != 0;
+            failed |= !isfinite(results[0].score);
+        }
     }
     kc_semidx_free(results);
     kc_semidx_close(built);
@@ -162,12 +186,42 @@ static int semidx_test_errors(void)
         failed |= count != 0;
         failed |= results != NULL;
         failed |= kc_semidx_save(index, path) != KC_SEMIDX_OK;
-        kc_semidx_close(index);
-        index = NULL;
         failed |= kc_semidx_open(&opened, path) != KC_SEMIDX_OK;
         failed |= opened == NULL || kc_semidx_count(opened) != 0;
         kc_semidx_close(opened);
         opened = NULL;
+
+        file = fopen(path, "r+b");
+        if (file != NULL) {
+            if (fseek(file, 52, SEEK_SET) == 0) {
+                int value = fgetc(file);
+
+                if (value == EOF || fseek(file, 52, SEEK_SET) != 0 ||
+                    fputc(value ^ 1, file) == EOF) {
+                    failed = 1;
+                }
+            } else failed = 1;
+            failed |= fclose(file) != 0;
+            failed |= kc_semidx_open(&opened, path) != KC_SEMIDX_EFORMAT;
+            failed |= opened != NULL;
+            kc_semidx_close(opened);
+            opened = NULL;
+        } else failed = 1;
+
+        failed |= kc_semidx_save(index, path) != KC_SEMIDX_OK;
+        file = fopen(path, "r+b");
+        if (file != NULL) {
+            if (fseek(file, 68, SEEK_SET) == 0) {
+                failed |= fputc(0xFF, file) == EOF;
+            } else failed = 1;
+            failed |= fclose(file) != 0;
+            failed |= kc_semidx_open(&opened, path) != KC_SEMIDX_EFORMAT;
+            failed |= opened != NULL;
+            kc_semidx_close(opened);
+            opened = NULL;
+        } else failed = 1;
+        kc_semidx_close(index);
+        index = NULL;
     }
     file = fopen(path, "wb");
     if (file != NULL) {
@@ -182,6 +236,229 @@ static int semidx_test_errors(void)
     remove(path);
     return semidx_test_result("invalid_inputs",
         "rejects invalid records and corrupted indexes", failed);
+}
+
+/**
+ * Build a compact corpus with duplicate identifiers and different terms.
+ * @return Owned searchable index, or NULL if building fails.
+ */
+static kc_semidx_t *semidx_test_modes_index(void)
+{
+    const kc_semidx_document_t corpus[] = {
+        {"shared", "alpha banana banana"},
+        {"shared", "banana peach"},
+        {"other", "coconut peach"}
+    };
+    kc_semidx_t *index = NULL;
+
+    if (kc_semidx_build(&index, corpus, 3) != KC_SEMIDX_OK)
+        return NULL;
+    return index;
+}
+
+/**
+ * Test exact BM25 candidates, scores, repeated IDs and lexical-only queries.
+ * @return Zero when all lexical contracts hold, otherwise one.
+ */
+static int semidx_test_lexical(void)
+{
+    kc_semidx_t *index = semidx_test_modes_index();
+    kc_semidx_result_t *results = NULL;
+    size_t count = 99, limit = 2;
+    kc_semidx_search_options_t options = {.limit = &limit};
+    int failed = 0;
+
+    if (index == NULL)
+        return semidx_test_result("lexical_search",
+            "finds exact tokens while preserving distinct associations", 1);
+    failed |= kc_semidx_search_mode(index, "banana",
+        KC_SEMIDX_MODE_LEXICAL, &options, &results, &count) != KC_SEMIDX_OK;
+    failed |= count != 2 || results == NULL;
+    if (results != NULL && count == 2) {
+        failed |= strcmp(results[0].id, "shared") != 0;
+        failed |= strcmp(results[1].id, "shared") != 0;
+        failed |= strcmp(results[0].content, "alpha banana banana") != 0;
+        failed |= strcmp(results[1].content, "banana peach") != 0;
+        failed |= !(results[0].score > results[1].score);
+    }
+    kc_semidx_free(results);
+    results = NULL;
+    failed |= kc_semidx_search_mode(index, "alpha",
+        KC_SEMIDX_MODE_LEXICAL, NULL, &results, &count) != KC_SEMIDX_OK;
+    failed |= count != 1 || results == NULL;
+    if (results != NULL && count == 1)
+        failed |= strcmp(results[0].content, "alpha banana banana") != 0;
+    kc_semidx_free(results);
+    results = NULL;
+    failed |= kc_semidx_search_mode(index, "nonexistentterm",
+        KC_SEMIDX_MODE_LEXICAL, NULL, &results, &count) != KC_SEMIDX_OK;
+    failed |= count != 0 || results != NULL;
+    kc_semidx_close(index);
+    return semidx_test_result("lexical_search",
+        "finds exact tokens while preserving distinct associations", failed);
+}
+
+/**
+ * Test RRF rank fusion, semantic-only candidates and deterministic overlap.
+ * @return Zero when the hybrid ranking contract holds, otherwise one.
+ */
+static int semidx_test_hybrid(void)
+{
+    kc_semidx_t *index = semidx_test_modes_index();
+    kc_semidx_result_t *lexical = NULL;
+    kc_semidx_result_t *semantic = NULL;
+    kc_semidx_result_t *results = NULL;
+    size_t lexical_count = 0, semantic_count = 0, count = 0;
+    int failed = 0;
+
+    if (index == NULL)
+        return semidx_test_result("hybrid_search",
+            "fuses BM25 and HNSW positions by ordinal with RRF", 1);
+    failed |= kc_semidx_search_mode(index, "alpha",
+        KC_SEMIDX_MODE_LEXICAL, NULL,
+        &lexical, &lexical_count) != KC_SEMIDX_OK;
+    failed |= lexical_count != 1 || lexical == NULL;
+    failed |= kc_semidx_search(index, "alpha", NULL,
+        &semantic, &semantic_count) != KC_SEMIDX_OK;
+    failed |= semantic_count != 3 || semantic == NULL;
+    failed |= kc_semidx_search_mode(index, "alpha",
+        KC_SEMIDX_MODE_HYBRID, NULL,
+        &results, &count) != KC_SEMIDX_OK;
+    failed |= count != 3 || results == NULL;
+    if (lexical != NULL && semantic != NULL && results != NULL &&
+        lexical_count == 1 && semantic_count == 3 && count == 3)
+    {
+        for (size_t i = 0; i < count; i++) {
+            double expected = 0.0;
+
+            for (size_t j = 0; j < lexical_count; j++) {
+                if (strcmp(results[i].content, lexical[j].content) == 0)
+                    expected += 1.0 / (61.0 + (double)j);
+            }
+            for (size_t j = 0; j < semantic_count; j++) {
+                if (strcmp(results[i].content, semantic[j].content) == 0)
+                    expected += 1.0 / (61.0 + (double)j);
+            }
+            failed |= !isfinite(results[i].score);
+            failed |= fabs(results[i].score - expected) > 1e-12;
+            if (i > 0)
+                failed |= results[i - 1].score < results[i].score;
+        }
+    }
+    kc_semidx_free(results);
+    results = NULL;
+    failed |= kc_semidx_search_mode(index, "nonexistentterm",
+        KC_SEMIDX_MODE_HYBRID, NULL, &results, &count) != KC_SEMIDX_OK;
+    failed |= count != 3 || results == NULL;
+    kc_semidx_free(results);
+    kc_semidx_free(semantic);
+    kc_semidx_free(lexical);
+    kc_semidx_close(index);
+    return semidx_test_result("hybrid_search",
+        "fuses BM25 and HNSW positions by ordinal with RRF", failed);
+}
+
+/**
+ * Check cosine reranking is constrained to the lexical candidate set.
+ * @return Zero when reranking and exclusions are correct, otherwise one.
+ */
+static int semidx_test_rerank(void)
+{
+    kc_semidx_t *index = semidx_test_modes_index();
+    kc_semidx_result_t *results = NULL;
+    size_t count = 0, limit = 1;
+    kc_semidx_search_options_t options = {.limit = &limit};
+    int failed = 0;
+
+    if (index == NULL)
+        return semidx_test_result("rerank_search",
+            "scores only lexical matches using stored document embeddings", 1);
+    failed |= kc_semidx_search_mode(index, "banana",
+        KC_SEMIDX_MODE_RERANK, NULL, &results, &count) != KC_SEMIDX_OK;
+    failed |= count != 2 || results == NULL;
+    if (results != NULL && count == 2) {
+        int a = 0, b = 0;
+
+        for (size_t i = 0; i < count; i++) {
+            a += strcmp(results[i].content, "alpha banana banana") == 0;
+            b += strcmp(results[i].content, "banana peach") == 0;
+            failed |= !isfinite(results[i].score);
+            failed |= results[i].score < -1.0 || results[i].score > 1.0;
+        }
+        failed |= a != 1 || b != 1;
+        failed |= results[0].score < results[1].score;
+    }
+    kc_semidx_free(results);
+    results = NULL;
+    failed |= kc_semidx_search_mode(index, "banana",
+        KC_SEMIDX_MODE_RERANK, &options, &results, &count) != KC_SEMIDX_OK;
+    failed |= count != 1 || results == NULL;
+    kc_semidx_free(results);
+    results = NULL;
+    failed |= kc_semidx_search_mode(index, "nonexistentterm",
+        KC_SEMIDX_MODE_RERANK, NULL, &results, &count) != KC_SEMIDX_OK;
+    failed |= count != 0 || results != NULL;
+    kc_semidx_close(index);
+    return semidx_test_result("rerank_search",
+        "scores only lexical matches using stored document embeddings", failed);
+}
+
+/**
+ * Check legacy semantic behavior and the new mode validation contracts.
+ * @return Zero when all mode argument and state checks hold, otherwise one.
+ */
+static int semidx_test_mode_contract(void)
+{
+    kc_semidx_t *index = semidx_test_modes_index();
+    kc_semidx_result_t *results = (kc_semidx_result_t *)1;
+    kc_semidx_result_t *reference = NULL;
+    size_t count = 99, reference_count = 0, limit = 0;
+    double bad = 2.0;
+    kc_semidx_search_options_t options = {
+        .limit = &limit, .threshold = &bad
+    };
+    int failed = 0;
+
+    if (index == NULL)
+        return semidx_test_result("mode_contract",
+            "retains semantic behavior and validates modes and options", 1);
+    failed |= kc_semidx_search_mode(index, "alpha", 99, NULL,
+        &results, &count) != KC_SEMIDX_EINVAL;
+    failed |= results != NULL || count != 0;
+    failed |= kc_semidx_search_mode(index, "alpha",
+        KC_SEMIDX_MODE_HYBRID, &options, &results,
+        &count) != KC_SEMIDX_EINVAL;
+    failed |= results != NULL || count != 0;
+    bad = -1.0;
+    failed |= kc_semidx_search_mode(index, "alpha",
+        KC_SEMIDX_MODE_HYBRID, &options, &results,
+        &count) != KC_SEMIDX_OK;
+    failed |= results != NULL || count != 0;
+    limit = 3;
+    failed |= kc_semidx_search(index, "alpha", &options,
+        &reference, &reference_count) != KC_SEMIDX_OK;
+    failed |= kc_semidx_search_mode(index, "alpha",
+        KC_SEMIDX_MODE_SEMANTIC, &options,
+        &results, &count) != KC_SEMIDX_OK;
+    failed |= count != reference_count;
+    if (results != NULL && reference != NULL && count == reference_count) {
+        for (size_t i = 0; i < count; i++) {
+            failed |= strcmp(results[i].content, reference[i].content) != 0;
+            failed |= results[i].score != reference[i].score;
+        }
+    } else failed = 1;
+    kc_semidx_free(results);
+    kc_semidx_free(reference);
+    results = NULL;
+    count = 99;
+    failed |= kc_semidx_search_mode(NULL, "alpha",
+        KC_SEMIDX_MODE_LEXICAL, NULL, &results,
+        &count) != KC_SEMIDX_EINVAL;
+    failed |= count != 0 || results != NULL;
+    failed |= kc_semidx_strerror(KC_SEMIDX_ELEXICAL) == NULL;
+    kc_semidx_close(index);
+    return semidx_test_result("mode_contract",
+        "retains semantic behavior and validates modes and options", failed);
 }
 
 #ifndef __EMSCRIPTEN__
@@ -244,6 +521,51 @@ static int semidx_test_cli(void)
     }
     failed |= rows != 2 || !found_security || !found_storage;
 
+    failed |= system(
+        KC_TEST_CLI " search semidx-cli-index.bin "
+        "authentication --mode lexical > semidx-cli-output.tsv 2>&1"
+    ) != 0;
+    file = fopen("semidx-cli-output.tsv", "rb");
+    if (file != NULL) {
+        failed |= fgets(line, sizeof(line), file) == NULL;
+        if (line[0] != '\0') {
+            failed |= strncmp(line, "shared\t", 7) != 0;
+            failed |= strstr(line, "encrypted peer") == NULL;
+        }
+        failed |= fgets(line, sizeof(line), file) != NULL;
+        failed |= fclose(file) != 0;
+    } else failed = 1;
+
+    failed |= system(
+        KC_TEST_CLI " search semidx-cli-index.bin "
+        "authentication -m hybrid > semidx-cli-output.tsv 2>&1"
+    ) != 0;
+    file = fopen("semidx-cli-output.tsv", "rb");
+    if (file != NULL) {
+        rows = 0;
+        while (fgets(line, sizeof(line), file) != NULL) rows++;
+        failed |= rows != 2;
+        failed |= fclose(file) != 0;
+    } else failed = 1;
+    failed |= system(
+        KC_TEST_CLI " search semidx-cli-index.bin "
+        "authentication -m rerank > semidx-cli-output.tsv 2>&1"
+    ) != 0;
+    file = fopen("semidx-cli-output.tsv", "rb");
+    if (file != NULL) {
+        rows = 0;
+        while (fgets(line, sizeof(line), file) != NULL) {
+            rows++;
+            failed |= strstr(line, "encrypted peer") == NULL;
+        }
+        failed |= rows != 1;
+        failed |= fclose(file) != 0;
+    } else failed = 1;
+    failed |= system(
+        KC_TEST_CLI " search semidx-cli-index.bin "
+        "authentication -m unsupported > " KC_TEST_NULL " 2>&1"
+    ) == 0;
+
     remove("semidx-cli-input.tsv");
     remove("semidx-cli-index.bin");
     remove("semidx-cli-output.tsv");
@@ -263,6 +585,18 @@ static int semidx_run_case(const char *name)
     semidx_test_current++;
     if (strcmp(name, "build_and_search") == 0) {
         return semidx_test_build();
+    }
+    if (strcmp(name, "lexical_search") == 0) {
+        return semidx_test_lexical();
+    }
+    if (strcmp(name, "hybrid_search") == 0) {
+        return semidx_test_hybrid();
+    }
+    if (strcmp(name, "rerank_search") == 0) {
+        return semidx_test_rerank();
+    }
+    if (strcmp(name, "mode_contract") == 0) {
+        return semidx_test_mode_contract();
     }
     if (strcmp(name, "binary_roundtrip") == 0) {
         return semidx_test_persistence();
@@ -289,6 +623,10 @@ int main(int argc, char **argv)
 {
     const char *cases[] = {
         "build_and_search",
+        "lexical_search",
+        "hybrid_search",
+        "rerank_search",
+        "mode_contract",
         "binary_roundtrip",
         "invalid_inputs",
 #ifndef __EMSCRIPTEN__

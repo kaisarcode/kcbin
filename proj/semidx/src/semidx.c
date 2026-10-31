@@ -25,7 +25,7 @@
 static void semidx_usage(const char *name)
 {
     printf("Usage: %s build <index.bin> [-i file]\n", name);
-    printf("       %s search <index.bin> <query> [-l N] [-t score]\n", name);
+    printf("       %s search <index.bin> <query> [-l N] [-t score] [-m mode]\n", name);
     printf("       %s -h | -v\n", name);
     printf("\n");
     printf("Build input: one id<TAB>content association per line.\n");
@@ -35,6 +35,7 @@ static void semidx_usage(const char *name)
     printf("  -i, --input <file>  Read associations from a file\n");
     printf("  -l, --limit <N>     Maximum results (default: 10)\n");
     printf("  -t, --threshold N  Minimum cosine similarity (default: -1)\n");
+    printf("  -m, --mode <mode>   semantic, lexical, hybrid, rerank (default: semantic)\n");
     printf("  -h, --help         Show this help\n");
     printf("  -v, --version      Show build version\n");
 }
@@ -85,6 +86,22 @@ static int semidx_parse_threshold(const char *text, double *out)
         return 1;
     }
     *out = value;
+    return 0;
+}
+
+/**
+ * Resolve one public search-mode name.
+ * @param name User-supplied mode text.
+ * @param out Receives the selected mode constant.
+ * @return Zero when the mode is supported, otherwise one.
+ */
+static int semidx_parse_mode(const char *name, int *out)
+{
+    if (strcmp(name, "semantic") == 0) *out = KC_SEMIDX_MODE_SEMANTIC;
+    else if (strcmp(name, "lexical") == 0) *out = KC_SEMIDX_MODE_LEXICAL;
+    else if (strcmp(name, "hybrid") == 0) *out = KC_SEMIDX_MODE_HYBRID;
+    else if (strcmp(name, "rerank") == 0) *out = KC_SEMIDX_MODE_RERANK;
+    else return 1;
     return 0;
 }
 
@@ -285,13 +302,15 @@ finished:
  * @param query Natural-language query.
  * @param limit Maximum number of returned matches.
  * @param threshold Minimum cosine similarity score.
+ * @param mode Search strategy, defaulting to semantic.
  * @return Process exit status.
  */
 static int semidx_search(
     const char *path,
     const char *query,
     size_t limit,
-    double threshold
+    double threshold,
+    int mode
 )
 {
     kc_semidx_t *index = NULL;
@@ -306,8 +325,8 @@ static int semidx_search(
 
     status = kc_semidx_open(&index, path);
     if (status == KC_SEMIDX_OK) {
-        status = kc_semidx_search(
-            index, query, &options, &results, &count
+        status = kc_semidx_search_mode(
+            index, query, mode, &options, &results, &count
         );
     }
     if (status != KC_SEMIDX_OK) {
@@ -370,6 +389,7 @@ int main(int argc, char **argv)
     if (strcmp(argv[1], "search") == 0 && argc >= 4) {
         size_t limit = 10;
         double threshold = -1.0;
+        int mode = KC_SEMIDX_MODE_SEMANTIC;
 
         for (int i = 4; i < argc; i++) {
             if ((strcmp(argv[i], "-l") == 0 ||
@@ -383,10 +403,15 @@ int main(int argc, char **argv)
                 semidx_parse_threshold(argv[i], &threshold) == 0) {
                 continue;
             }
+            if ((strcmp(argv[i], "-m") == 0 ||
+                strcmp(argv[i], "--mode") == 0) &&
+                ++i < argc && semidx_parse_mode(argv[i], &mode) == 0) {
+                continue;
+            }
             fprintf(stderr, "semidx: invalid search arguments\n");
             return 1;
         }
-        return semidx_search(argv[2], argv[3], limit, threshold);
+        return semidx_search(argv[2], argv[3], limit, threshold, mode);
     }
     fprintf(stderr, "semidx: invalid command\n");
     return 1;

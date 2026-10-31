@@ -81,6 +81,17 @@ be easier to write. Review the changed artifacts for these requirements
 before committing; do not claim compliance from memory or from a passing
 test suite alone.
 
+## Latest-only development contract
+
+Follow the same latest-only policy as the kclibs being composed. During active
+development, adjust API and serialized representations until behavior and
+contract tests are correct; once consolidated, keep that design stable. Never
+introduce legacy formats, old/new compatibility branches, migration readers,
+compatibility wrappers, or parallel versioned APIs unless explicitly requested.
+The current representation is the only supported one; do not add compatibility
+complexity for unreleased or unconsolidated implementations. CLI build-version
+reporting is independent from file-format compatibility.
+
 ## Project structure
 
 Each independently distributable project owns its `README.md`, `Makefile`, `manifest.json`, `src/`, tests, and LGPLv3 license files (`LICENSE` with the LGPLv3 text and `COPYING` with the accompanying GPLv3 text, matching kclib project conventions). Use `doc/` only when the project requires more documentation. A project may provide a native CLI, shared library, or both, without an obligatory common API.

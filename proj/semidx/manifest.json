@@ -1,6 +1,6 @@
 {
   "name": "semidx",
-  "description": "Builds and queries portable binary semantic indexes of text associations.",
+  "description": "Indexes text associations for semantic, lexical, hybrid, and reranked search.",
   "author": "KaisarCode",
   "license": "LGPL-3.0-only",
   "website": "https://kaisarcode.com",
@@ -9,6 +9,7 @@
   "dependencies": [
     "libemb",
     "libhnsw",
+    "libbm25",
     "libmmap"
   ]
 }

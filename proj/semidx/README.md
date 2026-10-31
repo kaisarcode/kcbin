@@ -1,9 +1,9 @@
 # semidx - Semantic text indexing
 
-semidx builds portable binary indexes from text associations and finds relevant
-entries using natural-language queries. Each entry has an ID and text content.
-IDs are arbitrary strings and may repeat. The library handles embeddings,
-vector search, and persistence without a database or server.
+semidx builds portable indexes from text associations and searches them using
+semantic embeddings, BM25 lexical ranking, or both. Each entry has an ID and
+text content. IDs may repeat, and each association remains independently
+searchable. Indexes work locally without a database or server.
 
 ## Quick start
 
@@ -18,11 +18,13 @@ Search the saved index:
 
 ```sh
 semidx search icons.bin "that made me laugh"
+semidx search icons.bin "smile" --mode hybrid
 ```
 
-Results are tab-separated lines containing ID, cosine similarity, and the
-original indexed content. All entries are ranked independently, including
-entries with the same ID.
+Results are tab-separated lines containing ID, score, and original content.
+The default semantic mode reports cosine similarity. Lexical mode reports BM25
+scores; hybrid mode reports reciprocal-rank-fusion scores; rerank mode reports
+cosine similarity for BM25-selected candidates.
 
 ## Native library
 
@@ -49,14 +51,16 @@ if (kc_semidx_build(&index, corpus, 2) == KC_SEMIDX_OK) {
 }
 ```
 
-The library exposes build, save, open, search, and close. The index
-owns its associations, so the source array may be released after building.
-Applications choose their own document boundaries and any preprocessing.
+The library exposes build, save, open, search, search_mode, and close. The
+index owns its associations, so the source array may be released after
+building. Applications choose their own document boundaries and preprocessing.
+The existing search API remains semantic; search_mode selects the other
+ranking strategies.
 
 ## Build
 
 Set `KCDIST_DIR` to a precompiled kclib distribution containing matching
-`libemb`, `libhnsw`, and `libmmap` artifacts and headers for the target:
+`libemb`, `libhnsw`, `libbm25`, and `libmmap` artifacts and headers for the target:
 
 ```sh
 export KCDIST_DIR="$HOME/kclib/dist"
@@ -87,13 +91,13 @@ export KCDIST_DIR="$HOME/kclib/dist"
 The distribution script publishes only semidx artifacts and metadata to the
 shared distribution root. It never compiles or copies the dependent kclibs.
 All targets link against the target-matched precompiled `libemb.a`,
-`libhnsw.a`, and `libmmap.a` from `KCDIST_DIR`; no separate kclib shared
+`libhnsw.a`, `libbm25.a`, and `libmmap.a` from `KCDIST_DIR`; no separate kclib shared
 libraries are required at runtime. Every target also produces `libsemidx.a`
 alongside its existing shared library or WASM module. This static archive
 contains semidx's C code; applications linking it must also link the three
 precompiled kclib archives, using a C++ linker for the GGML code in `libemb`.
 The WASM build produces `libsemidx.wasm` and `libsemidx.a`.
-Native CLI executables are linked with `libsemidx.a` and the three kclib
+Native CLI executables are linked with `libsemidx.a` and the four kclib
 static archives, so they do not need `libsemidx.so` or kclib shared libraries
 at runtime. The shared library is still published for other consumers.
 

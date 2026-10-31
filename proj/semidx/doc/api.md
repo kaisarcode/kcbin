@@ -1,7 +1,8 @@
 # API and CLI
 
-semidx takes an array of ID/text associations, generates embeddings internally,
-and searches the resulting index with natural-language text.
+semidx indexes ID/text associations and supports semantic, lexical, hybrid,
+and lexical-first reranked searches. Embeddings and lexical postings are
+generated internally.
 
 ## Data contract
 
@@ -62,6 +63,43 @@ from the open index. Close the index only after consuming the results.
 An index created with build may be searched immediately and saved. An index
 loaded with open is read-only and may be searched repeatedly.
 
+## Search modes
+
+The existing `kc_semidx_search()` remains semantic. Use
+`kc_semidx_search_mode()` with a mode constant for another strategy.
+
+| Mode | Ranking | Candidate selection |
+| :--- | :--- | :--- |
+| `KC_SEMIDX_MODE_SEMANTIC` | Cosine similarity via HNSW | Vector neighbors |
+| `KC_SEMIDX_MODE_LEXICAL` | Okapi BM25 | Matching lexical terms |
+| `KC_SEMIDX_MODE_HYBRID` | Reciprocal rank fusion | Union of BM25 and HNSW |
+| `KC_SEMIDX_MODE_RERANK` | Cosine similarity | BM25 candidates only |
+
+Hybrid mode retrieves up to 100 candidates per source, or the requested limit
+if larger, and sums `1 / (60 + rank)` for each source where a document appears.
+Ranks start at one. Hybrid scores are RRF scores, not BM25 or cosine scores.
+Rerank mode selects the same candidate window with BM25, then compares the
+query embedding against those documents' stored vectors directly. Documents
+excluded by BM25 cannot be recovered by reranking.
+
+The default result limit is 10. The `threshold` option filters cosine
+similarity in semantic and rerank modes and applies only to the HNSW branch
+in hybrid mode. Lexical mode ignores this threshold. The public result fields
+remain ID, content, and score. Repeated public IDs remain distinct through
+internal insertion ordinals; exact score ties use ordinal order.
+
+```c
+kc_semidx_result_t *results = NULL;
+size_t count = 0;
+size_t limit = 5;
+kc_semidx_search_options_t options = {.limit = &limit};
+
+if (kc_semidx_search_mode(index, "authentication",
+    KC_SEMIDX_MODE_HYBRID, &options, &results, &count) == KC_SEMIDX_OK) {
+    kc_semidx_free(results);
+}
+```
+
 ## JavaScript projection
 
 The intended JavaScript-facing shape is:
@@ -74,6 +112,7 @@ const index = await semidx.build([
 
 await index.save("corpus.bin");
 const matches = await index.search("secure peer communication", {
+    mode: "hybrid",
     limit: 5
 });
 await index.close();
@@ -105,11 +144,15 @@ Search an existing binary index:
 ```sh
 semidx search corpus.bin "peer authentication"
 semidx search corpus.bin "security" --limit 5 --threshold 0.3
+semidx search corpus.bin "peer authentication" --mode lexical
+semidx search corpus.bin "peer authentication" --mode hybrid
+semidx search corpus.bin "peer authentication" --mode rerank
 ```
 
 Each output line uses the same tab delimiter with fields
-`id<TAB>score<TAB>content`. The CLI writes errors to standard error and
-exits nonzero on invalid input, incompatible indexes, or failed operations.
+`id<TAB>score<TAB>content`. The default mode is `semantic`.
+The CLI writes errors to standard error and exits nonzero on invalid
+input, incompatible indexes, or failed operations.
 
 ## Next step
 
