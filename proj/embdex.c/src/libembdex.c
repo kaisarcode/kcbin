@@ -1136,6 +1136,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     float *embedding = NULL;
     size_t dimension = 0, limit = 10, window, lexical_count = 0;
     size_t semantic_count = 0, rank_count = 0;
+    double weights[KC_EMBDEX_QUERY_TOKENS] = {0};
+    double total_weight = 0;
     int status = KC_EMBDEX_OK;
 
     if (index == NULL || query == NULL || callback == NULL ||
@@ -1219,6 +1221,16 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                     }
                 }
             }
+        }
+        {
+            size_t frequency = post.found;
+            double rarity;
+
+            if (frequency > index->count) frequency = index->count;
+            rarity = log(1.0 + ((double)(index->count - frequency) + 0.5) /
+                ((double)frequency + 0.5));
+            weights[i] = rarity;
+            total_weight += rarity;
         }
     }
 
@@ -1340,12 +1352,22 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     for (size_t i = 0; i < index->count; i++) {
         kc_embdex_evidence_t *item = &evidence[i];
         uint64_t mask = item->exact | item->fuzzy | item->phrase;
-        size_t covered = kc_embdex_popcount(mask);
         size_t exact = kc_embdex_popcount(item->exact);
         size_t corrected = kc_embdex_popcount(item->fuzzy & ~item->exact);
-        double coverage = (double)covered / (double)tokens.count;
-        double precise = (double)exact / (double)tokens.count;
+        double weight_covered = 0, weight_exact = 0, weight_corrected = 0;
+        double coverage, precise;
         double phrase = (double)item->longest / (double)tokens.count;
+
+        for (size_t j = 0; j < tokens.count; j++) {
+            uint64_t bit = UINT64_C(1) << j;
+
+            if ((mask & bit) != 0) weight_covered += weights[j];
+            if ((item->exact & bit) != 0) weight_exact += weights[j];
+            if ((item->fuzzy & ~item->exact & bit) != 0)
+                weight_corrected += weights[j];
+        }
+        coverage = total_weight > 0 ? weight_covered / total_weight : 0;
+        precise = total_weight > 0 ? weight_exact / total_weight : 0;
         double bm25 = item->lexical_rank != 0 ?
             10.0 / (10.0 + (double)item->lexical_rank) : 0.0;
         double semantic_score = item->semantic_found ?
@@ -1376,7 +1398,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         score = 0.45 * coverage + 0.25 * precise +
             0.15 * phrase + 0.10 * bm25 +
             0.50 * semantic_score -
-            0.08 * ((double)corrected / (double)tokens.count);
+            0.08 * (total_weight > 0 ?
+                weight_corrected / total_weight : 0);
         if (item->full_phrase) score += 0.5;
         item->score = score;
         ranks[rank_count].ordinal = i;
