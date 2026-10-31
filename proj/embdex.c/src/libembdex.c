@@ -482,8 +482,6 @@ int kc_embdex_open(kc_embdex_t **out, const char *path)
         return KC_EMBDEX_EIO;
     }
     status = kc_embdex_load_records(index);
-    if (status == KC_EMBDEX_OK && index->count > KC_EMBDEX_EXACT_LIMIT)
-        status = kc_embdex_prepare_graph(index);
     if (status == KC_EMBDEX_OK) {
         const void *mapped = NULL;
         size_t mapped_size = 0;
@@ -503,6 +501,8 @@ int kc_embdex_open(kc_embdex_t **out, const char *path)
         else if (kc_bm25_count(index->lexical) != index->count)
             status = KC_EMBDEX_EFORMAT;
     }
+    if (status == KC_EMBDEX_OK && index->count > KC_EMBDEX_EXACT_LIMIT)
+        status = kc_embdex_prepare_graph(index);
     if (status != KC_EMBDEX_OK) {
         kc_embdex_close(index);
         return status;
@@ -1272,13 +1272,16 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         int accepted;
 
         accepted = item->full_phrase ||
-            (exact == tokens.count) ||
+            (!tokens.truncated && exact == tokens.count) ||
             (coverage >= 0.5 && (exact > 0 || corrected > 0)) ||
             (item->semantic_found &&
                 semantic_score >= semantic_only_floor) ||
             (item->semantic_found && semantic_score >= semantic_floor &&
                 (exact > 0 || corrected > 0 || item->lexical_rank != 0)) ||
             (tokens.count == 1 && corrected > 0);
+        if (tokens.truncated)
+            accepted = item->semantic_found &&
+                semantic_score >= semantic_only_floor;
         if (!accepted) continue;
 
         score = 0.45 * coverage + 0.25 * precise +
