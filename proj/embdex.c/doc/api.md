@@ -67,9 +67,10 @@ An omitted limit defaults to ten. A limit of zero delivers no matches.
 Results are not caller-owned and require no free operation. The opened
 index remains usable for additional searches until closed.
 
-The public operations are kc_embdex_build, kc_embdex_open,
-kc_embdex_search, kc_embdex_close, kc_embdex_strerror, and
-kc_embdex_version. There are no public search modes.
+The public operations are kc_embdex_build,
+kc_embdex_build_with_dictionaries, kc_embdex_open, kc_embdex_search,
+kc_embdex_close, kc_embdex_strerror, and kc_embdex_version.
+There are no public search modes.
 
 ## Retrieval
 
@@ -147,84 +148,73 @@ checked for valid UTF-8 before lexical retrieval.
 Indexes up to 256 associations use exact cosine and skip a resident
 HNSW graph; larger indexes construct HNSW at open time.
 
-## Experimental literal word substitutions
+## Dictionary-compiled maps
 
-To build a domain-specific or language-specific map, provide a dataset
-and optionally set `KC_EMBDEX_WORDMAP` to a tab-separated UTF-8 dictionary
-of one **source word** and one **English word** per line. Repeated source
-words declare alternative translations in file order.
+A compiled map can be built from one dataset and zero or more independent
+word-substitution dictionaries. Each dictionary is a UTF-8 TSV file with
+one source word and one replacement word per line:
 
-Build-time normalization is strictly word-for-word. Unknown words and
-punctuation remain unchanged; no grammatical translation is performed.
-The original associations are preserved. Embeddings use the first
-available translation for each word. Two independent BM25 structures
-index the original and dictionary-normalized text. Search compares
-query terms with both, alongside semantic embeddings and phrase evidence.
-
-```sh
-KC_EMBDEX_WORDMAP=wordmap-es-en.tsv embdex build corpus.bin -i corpus.tsv
-embdex search corpus.bin "qué bondi va al centro" --limit 5
+```text
+claves	passwords
+claves	keys
 ```
 
-The corpus embeddings use the **first** English translation for each word.
-Queries can test up to 16 deterministic combinations. When all possible
-combinations fit the budget, the engine enumerates them using mixed-radix
-indexes. Otherwise it uses staggered substitutions across the entire
-sentence, so alternatives near the end are not excluded merely because
-earlier words have several translations. Multiple words may change in
-the same candidate.
+The input order matters: the first replacement for each source word is
+used for document embeddings and the additional normalized BM25 index.
+Further replacements become alternatives when processing queries.
+Dictionary files can overlap; duplicate pairs are ignored, while
+different replacements for the same source word remain available.
+No language identifier, locale, grammar or word meanings are required.
 
-Identical pseudo-English strings are recognized before inference and
-embedded once. Each distinct translation is ranked independently against
-the corpus, without additional model calls. With multiple translations,
-the semantic contribution to the final ranking combines the maximum
-cosine (weight 0.30) with mean normalized reciprocal rank (weight 0.20).
-The reciprocal weight of position `r` is `2 / (1 + r)`. A single
-translation preserves the original cosine contribution (weight 0.50).
+```sh
+embdex build mapa.bin -i asociaciones.tsv \
+    -d spanish.tsv -d rioplatense.tsv
+embdex search mapa.bin "guardar mis claves"
+```
 
-The acceptance rules still use the highest cosine and the existing
-lexical evidence; fusion only reorders accepted associations. On small
-indexes, each translation ranks every association. With HNSW, only
-returned candidates contribute to that translation's ranking.
+The output binary embeds its merged word dictionary, original associations,
+their normalized vectors, and both original and substituted lexical indexes.
+Opening and searching the map requires only the binary, even when the
+original TSV files have been deleted. Independent maps can use entirely
+different datasets and dictionary combinations.
 
-When `KC_EMBDEX_TRACE` is enabled, `variant_scores` records one cosine
-per distinct candidate text for each association. `fusion_rrf` records
-the mean normalized reciprocal rank. `variants_requested` and
-`variants_evaluated` show how many candidate combinations were considered
-and how many distinct strings needed embeddings; `variant` identifies
-the combination yielding the highest cosine. HNSW candidates not
-visited by a translation have null entries.
+The C API also accepts explicit dictionary inputs:
 
-The weights were selected through an exploratory replay of the existing
-bilingual benchmark and still require validation with an independent
-execution. No grammatical correction or translation-ranking model is
-introduced.
+```c
+const char *dictionaries[] = {"spanish.tsv", "rioplatense.tsv"};
+int status = kc_embdex_build_with_dictionaries(
+    "mapa.bin", documents, document_count, dictionaries, 2);
+```
 
-The `KC_EMBDEX_WORDMAP_VARIANTS` budget defaults to 8 when ambiguous words
-are present (1 disables alternative combinations). The dictionary is only
-a **build input**: in version 2 the binary index embeds both lexical sections
-and its normalized dictionary. `kc_embdex_open()` does not need the
-dictionary TSV or its environment variable. Multiple indexes built with
-different dictionaries can coexist; the consuming application chooses the
-appropriate binary map. A changed dictionary requires rebuilding that map.
+The existing `kc_embdex_build()` remains available for maps that do not
+specify dictionary inputs. An older `KC_EMBDEX_WORDMAP` environment
+configuration is still recognized for compatibility with experimental
+indexes, but explicit dictionary files are the preferred build interface.
 
-Dictionary-free indexes retain version 1 and the original search path.
-The previous experimental version 1 indexes created with an external
-wordmap still depend on that original environment configuration.
+This is literal substitution rather than sentence translation. Unmatched
+words are preserved. Queries can test up to 16 deterministic combinations
+when words have alternative replacements. If the complete combination set
+fits the budget it is enumerated; otherwise candidate combinations are
+distributed across the ambiguous positions. Duplicate resulting strings
+are embedded only once.
 
-`KC_EMBDEX_WORDMAP_TRACE` can write optional JSONL records containing
-the original text, substituted text and combination number.
-Like `KC_EMBDEX_TRACE`, it is diagnostic and includes user content.
+With multiple query variants, semantic ranking combines the highest cosine
+with reciprocal-ranking agreement across variants. Both BM25 structures
+also contribute lexical evidence. A map is an approximate candidate
+narrower for downstream classification; it does not assign final meaning
+to a word or guarantee that an arbitrary query has a correct result.
 
-The dictionary input and translation-variant controls remain
-experimental build/search mechanisms, not a standardized cross-project
-dictionary format or public search modes. The persistent index is already
-independent of those build inputs for normal use.
+Set `KC_EMBDEX_WORDMAP_VARIANTS` to change the variant budget (default 8,
+maximum 16). `KC_EMBDEX_TRACE` records candidate evidence, including
+`mapped`, `mapped_bm25_rank`, `fusion_rrf`, and `variant_scores`.
+`KC_EMBDEX_WORDMAP_TRACE` records the actual substituted query strings.
+These traces are optional and contain the input text.
 
 ## CLI
 
 Build reads tab-separated ID/content associations from standard input
-or a file:
+or a file. Optional `-d` / `--dictionary` flags are repeatable and
+provide independent dictionary files in priority order:
 
 ```sh
 embdex build corpus.bin -i documents.tsv
