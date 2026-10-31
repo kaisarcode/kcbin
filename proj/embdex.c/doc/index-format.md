@@ -11,29 +11,28 @@ without referring to the original dataset or dictionary.
 
 ## Format
 
-The file uses little-endian integer fields. A dictionary-free index
-retains the version 1 format with a 72-byte header. A dictionary-built
-index uses version 2 and a 104-byte header:
+The file uses little-endian integer fields and one format version 3
+with a 104-byte header, whether or not dictionaries are present:
 
 | Offset | Size | Value |
 | :--- | ---: | :--- |
 | 0 | 8 | `KCEMBDX\\n` magic bytes |
-| 8 | 4 | Format version (1 or 2) |
+| 8 | 4 | Format version (3) |
 | 12 | 4 | Vector dimension |
 | 16 | 8 | Number of associations |
-| 24 | 32 | Embedding identity (including dictionary fingerprint for version 2) |
+| 24 | 32 | Model identity and dictionary fingerprint |
 | 56 | 8 | Original BM25 section offset |
 | 64 | 8 | Original BM25 section length |
-| 72 | 8 | Normalized BM25 section offset (version 2) |
-| 80 | 8 | Normalized BM25 section length (version 2) |
-| 88 | 8 | Dictionary section offset (version 2) |
-| 96 | 8 | Dictionary section length (version 2) |
+| 72 | 8 | Normalized BM25 section offset |
+| 80 | 8 | Normalized BM25 section length (zero without a dictionary) |
+| 88 | 8 | Dictionary section offset |
+| 96 | 8 | Dictionary section length |
 
-Version 2 contains contiguous sections in order: associations and vectors,
-original BM25, normalized BM25, and dictionary. The dictionary starts
-with its 32-bit entry count and uses 32-bit byte lengths followed by
-NUL-terminated source/replacement word pairs. Repeated source words
-retain the ordered alternatives supplied by all input dictionaries,
+The file contains contiguous sections in order: associations and vectors,
+original BM25, optional normalized BM25, and dictionary. The dictionary starts
+with a 32-bit entry count (zero when absent) and uses 32-bit byte lengths
+followed by NUL-terminated source/replacement word pairs. Repeated source
+words retain the ordered alternatives supplied by all input dictionaries,
 with exact duplicate pairs discarded. Neither source nor replacement
 is labeled with a language.
 
@@ -45,17 +44,16 @@ the internal identity for every retrieval mechanism.
 Each BM25 section contains analyzer configuration, normalized terms,
 document statistics, and postings. The source and translated BM25 indexes
 share association ordinals but remain independent. They use accent folding.
-The merged dictionary embedded in version 2 is loaded into a compact
-lookup table when the map is opened; none of the original TSV files
-are needed.
+The embedded dictionary is loaded into a compact lookup table when
+the map is opened; none of the original TSV files are needed.
 
 Loaded indexes validate section boundaries, association counts, vector
-dimensions and dictionary structure. Version 1 remains readable for
-dictionary-free maps. Older version 1 indexes built with the experimental
-external dictionary still require their original external configuration.
+dimensions, dictionary structure, and the embedded dictionary fingerprint.
+The fingerprint detects inconsistent dictionary metadata; it is not a
+cryptographic signature.
 
-The previous index format is not read by this version. Rebuild existing
-indexes from their source associations after updating the library.
+Only format version 3 is supported. Rebuild every older map from its source
+associations and dictionaries after updating the library.
 
 ## Memory and persistence
 
