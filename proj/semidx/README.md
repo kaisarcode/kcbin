@@ -105,7 +105,6 @@ at runtime. The shared library is still published for other consumers.
 
 - [API and CLI](doc/api.md) - usage, associations, options, and lifecycle.
 - [Binary index](doc/index-format.md) - portability and persistence contract.
-- [Benchmark](bench/README.md) - datasets and comparison of search modes.
 
 ## Notice
 
