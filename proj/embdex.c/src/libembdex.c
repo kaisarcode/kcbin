@@ -2127,6 +2127,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                             goto finished;
                         }
                         item = &evidence[(size_t)ordinal];
+                        ranks[i].ordinal = (size_t)ordinal;
+                        ranks[i].score = semantic[i].score;
                         if (variant_scores != NULL)
                             variant_scores[(size_t)ordinal * variants +
                                 unique_variants] = semantic[i].score;
