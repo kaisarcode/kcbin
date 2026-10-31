@@ -1,6 +1,6 @@
 {
   "name": "embdex",
-  "description": "Indexes text associations for semantic, lexical, hybrid, and reranked search.",
+  "description": "Indexes text associations for automatic lexical, spelling, phrase and semantic retrieval.",
   "author": "KaisarCode",
   "license": "LGPL-3.0-only",
   "website": "https://kaisarcode.com",
@@ -10,6 +10,8 @@
     "libemb",
     "libhnsw",
     "libbm25",
-    "libmmap"
+    "libmmap",
+    "libngram",
+    "libleven"
   ]
 }
