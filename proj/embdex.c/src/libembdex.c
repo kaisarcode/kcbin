@@ -1243,47 +1243,91 @@ static int kc_embdex_serialized_size(
 static int kc_embdex_save(const kc_embdex_t *index, const char *path)
 {
     kc_mmap_t *mapping = NULL;
-    unsigned char *data;
-    void *lexical_bytes = NULL;
-    size_t size, lexical_size = 0, record_size;
-    size_t offset = KC_EMBDEX_HEADER_SIZE;
-    int status = KC_EMBDEX_EIO;
+    unsigned char *data = NULL;
+    void *lexical_bytes = NULL, *mapped_bytes = NULL;
+    size_t size = 0, lexical_size = 0, mapped_size = 0;
+    size_t words_size = 0, record_size = 0, offset;
+    int status;
 
-    if (index == NULL || path == NULL || path[0] == '\0') {
+    if (index == NULL || path == NULL || path[0] == '\0')
         return KC_EMBDEX_EINVAL;
-    }
-    if (index->mapping != NULL) {
+    if (index->mapping != NULL || index->lexical == NULL ||
+        (index->word_count > 0 && index->mapped_lexical == NULL))
         return KC_EMBDEX_ESTATE;
-    }
-    if (index->lexical == NULL) return KC_EMBDEX_ESTATE;
     status = kc_embdex_serialized_size(index, &record_size);
     if (status != KC_EMBDEX_OK) return status;
     {
-        int lexical_status = kc_bm25_export(index->lexical,
+        int result = kc_bm25_export(index->lexical,
             &lexical_bytes, &lexical_size);
 
-        if (lexical_status != KC_BM25_OK)
-            return lexical_status == KC_BM25_ENOMEM ?
+        if (result != KC_BM25_OK) {
+            status = result == KC_BM25_ENOMEM ?
                 KC_EMBDEX_ENOMEM : KC_EMBDEX_ELEXICAL;
+            goto finished;
+        }
     }
-    if (record_size > SIZE_MAX - lexical_size) {
-        kc_bm25_free(lexical_bytes);
-        return KC_EMBDEX_ENOMEM;
+    if (index->word_count > 0) {
+        int result = kc_bm25_export(index->mapped_lexical,
+            &mapped_bytes, &mapped_size);
+
+        if (result != KC_BM25_OK) {
+            status = result == KC_BM25_ENOMEM ?
+                KC_EMBDEX_ENOMEM : KC_EMBDEX_ELEXICAL;
+            goto finished;
+        }
+        words_size = 4;
+        for (size_t i = 0; i < index->word_count; i++) {
+            size_t source_length = strlen(index->wordmap[i].source);
+            size_t replacement_length =
+                strlen(index->wordmap[i].replacement);
+
+            if (source_length == 0 || replacement_length == 0 ||
+                source_length > UINT32_MAX ||
+                replacement_length > UINT32_MAX ||
+                source_length > SIZE_MAX - replacement_length - 10 ||
+                words_size > SIZE_MAX -
+                    (source_length + replacement_length + 10))
+            {
+                status = KC_EMBDEX_EFORMAT;
+                goto finished;
+            }
+            words_size += source_length + replacement_length + 10;
+        }
     }
-    size = record_size + lexical_size;
+    if (record_size > SIZE_MAX - lexical_size ||
+        record_size + lexical_size > SIZE_MAX - mapped_size ||
+        record_size + lexical_size + mapped_size > SIZE_MAX - words_size)
+    {
+        status = KC_EMBDEX_ENOMEM;
+        goto finished;
+    }
+    size = record_size + lexical_size + mapped_size + words_size;
     data = (unsigned char *)malloc(size);
     if (data == NULL) {
-        kc_bm25_free(lexical_bytes);
-        return KC_EMBDEX_ENOMEM;
+        status = KC_EMBDEX_ENOMEM;
+        goto finished;
     }
+    memset(data, 0, index->word_count > 0 ?
+        KC_EMBDEX_MAPPED_HEADER_SIZE : KC_EMBDEX_HEADER_SIZE);
     memcpy(data, kc_embdex_magic, 8);
-    kc_embdex_write_u32(data + 8, KC_EMBDEX_FORMAT_VERSION);
+    kc_embdex_write_u32(data + 8, index->word_count > 0 ?
+        KC_EMBDEX_MAPPED_FORMAT_VERSION : KC_EMBDEX_FORMAT_VERSION);
     kc_embdex_write_u32(data + 12, (uint32_t)index->dimension);
     kc_embdex_write_u64(data + 16, (uint64_t)index->count);
     memcpy(data + 24, index->model_tag, KC_EMBDEX_MODEL_SIZE);
     kc_embdex_write_u64(data + 56, (uint64_t)record_size);
     kc_embdex_write_u64(data + 64, (uint64_t)lexical_size);
+    if (index->word_count > 0) {
+        kc_embdex_write_u64(data + 72,
+            (uint64_t)(record_size + lexical_size));
+        kc_embdex_write_u64(data + 80, (uint64_t)mapped_size);
+        kc_embdex_write_u64(data + 88,
+            (uint64_t)(record_size + lexical_size + mapped_size));
+        kc_embdex_write_u64(data + 96, (uint64_t)words_size);
+    }
 
+    offset = index->word_count > 0 ?
+        KC_EMBDEX_MAPPED_HEADER_SIZE : KC_EMBDEX_HEADER_SIZE;
     for (size_t i = 0; i < index->count; i++) {
         size_t id_length = strlen(index->records[i].id);
         size_t content_length = strlen(index->records[i].content);
@@ -1293,37 +1337,55 @@ static int kc_embdex_save(const kc_embdex_t *index, const char *path)
         offset += 8;
         memcpy(data + offset, index->records[i].id, id_length + 1);
         offset += id_length + 1;
-        memcpy(
-            data + offset,
-            index->records[i].content,
-            content_length + 1
-        );
+        memcpy(data + offset, index->records[i].content,
+            content_length + 1);
         offset += content_length + 1;
         for (size_t j = 0; j < index->dimension; j++) {
             kc_embdex_write_float(
                 data + offset + j * sizeof(float),
-                index->records[i].owned_vector[j]
-            );
+                index->records[i].owned_vector[j]);
         }
         offset += index->dimension * sizeof(float);
     }
     if (offset != record_size) {
-        kc_bm25_free(lexical_bytes);
-        free(data);
-        return KC_EMBDEX_EFORMAT;
+        status = KC_EMBDEX_EFORMAT;
+        goto finished;
     }
     memcpy(data + offset, lexical_bytes, lexical_size);
-    kc_bm25_free(lexical_bytes);
+    offset += lexical_size;
+    if (index->word_count > 0) {
+        memcpy(data + offset, mapped_bytes, mapped_size);
+        offset += mapped_size;
+        kc_embdex_write_u32(data + offset, (uint32_t)index->word_count);
+        offset += 4;
+        for (size_t i = 0; i < index->word_count; i++) {
+            size_t a = strlen(index->wordmap[i].source);
+            size_t b = strlen(index->wordmap[i].replacement);
 
-    status = KC_EMBDEX_EIO;
-    if (kc_mmap_open(&mapping, path) == KC_MMAP_OK) {
-        if (kc_mmap_set(mapping, data, size) == KC_MMAP_OK &&
-            kc_mmap_save(mapping) == KC_MMAP_OK) {
-            status = KC_EMBDEX_OK;
+            kc_embdex_write_u32(data + offset, (uint32_t)a);
+            kc_embdex_write_u32(data + offset + 4, (uint32_t)b);
+            offset += 8;
+            memcpy(data + offset, index->wordmap[i].source, a + 1);
+            offset += a + 1;
+            memcpy(data + offset, index->wordmap[i].replacement, b + 1);
+            offset += b + 1;
         }
     }
+    if (offset != size) {
+        status = KC_EMBDEX_EFORMAT;
+        goto finished;
+    }
+    status = KC_EMBDEX_EIO;
+    if (kc_mmap_open(&mapping, path) == KC_MMAP_OK &&
+        kc_mmap_set(mapping, data, size) == KC_MMAP_OK &&
+        kc_mmap_save(mapping) == KC_MMAP_OK)
+        status = KC_EMBDEX_OK;
+
+finished:
     kc_mmap_close(mapping);
     free(data);
+    kc_bm25_free(lexical_bytes);
+    kc_bm25_free(mapped_bytes);
     return status;
 }
 
