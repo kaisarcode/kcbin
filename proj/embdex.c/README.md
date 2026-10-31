@@ -26,6 +26,19 @@ embdex search icons.bin "smile" --limit 5
 
 Output is tab-separated: ID, ranking score, and original content.
 
+A map can be compiled with a domain-specific dictionary:
+
+```sh
+KC_EMBDEX_WORDMAP=es-ar-security.tsv \
+    embdex build security-es-ar.bin -i security-es-ar.tsv
+embdex search security-es-ar.bin "guardar mis claves"
+```
+
+The binary preserves original associations and includes its own dictionary,
+normalized lexical index and vectors. Queries require only the compiled map;
+applications can maintain separate maps by domain, language or regional
+variant without configuring a global dictionary.
+
 ## Native library
 
 The library accepts the associations directly. Building persists the index;
@@ -72,9 +85,10 @@ Query coverage, phrase completeness, spelling uncertainty, BM25 rank and
 semantic similarity influence the final ranking. Matches without sufficient
 evidence are rejected rather than returning the nearest neighbor unconditionally.
 
-Embeddings are calculated once for each query that needs them. When one
-complete phrase match already satisfies a single-result request, inference
-can be skipped. Indexes with up to 256 associations use exact cosine
+Dictionary-free searches calculate one embedding when needed. Maps with
+ambiguous translations can evaluate a bounded set of distinct word
+combinations. When one complete phrase match satisfies a single-result
+request, inference can be skipped. Indexes with up to 256 associations use exact cosine
 similarity and do not build HNSW; larger indexes use HNSW.
 
 The lexical analyzer folds accents, and spelling correction considers only
