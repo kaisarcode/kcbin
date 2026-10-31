@@ -1,158 +1,114 @@
 # API and CLI
 
-embdex indexes ID/text associations and supports semantic, lexical, hybrid,
-and lexical-first reranked searches. Embeddings and lexical postings are
-generated internally.
+embdex indexes independent ID/text associations and searches them with one
+automatic retrieval strategy. The caller provides content and a query;
+normalization, ranking, candidate handling, and resource management belong
+to the library.
 
-## Data contract
+## Associations
 
-Every association contains an ID string and a content string. IDs are not keys:
-multiple entries may use the same ID and each remains independently searchable.
-The application decides which text to index, whether to split documents, and
-what an ID represents. embdex does not read source document formats.
+Each entry has an ID and UTF-8 content string. IDs are not unique keys:
+repeated IDs represent separate associations. The source application
+determines how to split documents and what IDs mean.
 
 ## C API
 
 ```c
 #include "libembdex.h"
 
-kc_embdex_document_t corpus[] = {
+kc_embdex_document_t documents[] = {
     {"icon-laugh", "Humor, laughter and something amusing"},
     {"icon-laugh", "Joy and a cheerful smile"},
     {"icon-alert", "Warning, danger and caution"}
 };
 
-kc_embdex_t *index = NULL;
-int status = kc_embdex_build(&index, corpus, 3);
-if (status == KC_EMBDEX_OK) {
-    status = kc_embdex_save(index, "icons.bin");
-}
-kc_embdex_close(index);
+int status = kc_embdex_build("icons.bin", documents, 3);
 ```
 
-To query the stored index:
+Building writes the index directly to the specified path. Input strings
+are borrowed only for the call. There is no separate save operation.
+
+To query the saved index:
 
 ```c
-kc_embdex_t *index = NULL;
-kc_embdex_result_t *results = NULL;
-size_t count = 0;
-size_t limit = 5;
-double threshold = 0.4;
-kc_embdex_search_options_t options = {
-    .limit = &limit,
-    .threshold = &threshold
-};
+#include "libembdex.h"
+#include <stdio.h>
 
-if (kc_embdex_open(&index, "icons.bin") == KC_EMBDEX_OK) {
-    if (kc_embdex_search(index, "something funny", &options,
-        &results, &count) == KC_EMBDEX_OK) {
-        for (size_t i = 0; i < count; i++) {
-            printf("%s: %.3f\n", results[i].id, results[i].score);
-        }
-        kc_embdex_free(results);
+static int show(const kc_embdex_result_t *result, void *userdata)
+{
+    (void)userdata;
+    printf("%s\t%.6f\t%s\n",
+        result->id, result->score, result->content);
+    return 0;
+}
+
+int search_icons(void)
+{
+    kc_embdex_t *index = NULL;
+    size_t limit = 5;
+    kc_embdex_search_options_t options = { .limit = &limit };
+    int status = kc_embdex_open(&index, "icons.bin");
+
+    if (status == KC_EMBDEX_OK) {
+        status = kc_embdex_search(index, "something funny",
+            &options, show, NULL);
     }
     kc_embdex_close(index);
+    return status;
 }
 ```
 
-The default search returns up to ten entries with a minimum cosine score of
--1. Set limit to zero to request no results. The cosine threshold must be in
-the range -1 to 1. Results own their array, but result strings borrow storage
-from the open index. Close the index only after consuming the results.
+A callback receives one borrowed result at a time, already ordered by
+ranking score. Its result pointer and strings remain valid only during
+the invocation; copy them if they must outlive it. Return zero to keep
+receiving matches, or nonzero to stop delivery successfully.
 
-An index created with build may be searched immediately and saved. An index
-loaded with open is read-only and may be searched repeatedly.
+An omitted limit defaults to ten. A limit of zero delivers no matches.
+Results are not caller-owned and require no free operation. The opened
+index remains usable for additional searches until closed.
 
-## Search modes
+The public operations are kc_embdex_build, kc_embdex_open,
+kc_embdex_search, kc_embdex_close, kc_embdex_strerror, and
+kc_embdex_version. There are no public search modes.
 
-The existing `kc_embdex_search()` remains semantic. Use
-`kc_embdex_search_mode()` with a mode constant for another strategy.
+## Retrieval
 
-| Mode | Ranking | Candidate selection |
-| :--- | :--- | :--- |
-| `KC_EMBDEX_MODE_SEMANTIC` | Cosine similarity via HNSW | Vector neighbors |
-| `KC_EMBDEX_MODE_LEXICAL` | Okapi BM25 | Matching lexical terms |
-| `KC_EMBDEX_MODE_HYBRID` | Reciprocal rank fusion | Union of BM25 and HNSW |
-| `KC_EMBDEX_MODE_RERANK` | Cosine similarity | BM25 candidates only |
+The current implementation independently retrieves BM25 and HNSW
+candidates, joins them by internal ordinal, and merges their rankings
+with reciprocal-rank fusion. Semantic candidates below an initial
+cosine-similarity cutoff are excluded. The cutoff and fusion are
+provisional, not a validated universal relevance policy.
 
-Hybrid mode retrieves up to 100 candidates per source, or the requested limit
-if larger, and sums `1 / (60 + rank)` for each source where a document appears.
-Ranks start at one. Hybrid scores are RRF scores, not BM25 or cosine scores.
-Rerank mode selects the same candidate window with BM25, then compares the
-query embedding against those documents' stored vectors directly. Documents
-excluded by BM25 cannot be recovered by reranking.
-
-The default result limit is 10. The `threshold` option filters cosine
-similarity in semantic and rerank modes and applies only to the HNSW branch
-in hybrid mode. Lexical mode ignores this threshold. The public result fields
-remain ID, content, and score. Repeated public IDs remain distinct through
-internal insertion ordinals; exact score ties use ordinal order.
-
-```c
-kc_embdex_result_t *results = NULL;
-size_t count = 0;
-size_t limit = 5;
-kc_embdex_search_options_t options = {.limit = &limit};
-
-if (kc_embdex_search_mode(index, "authentication",
-    KC_EMBDEX_MODE_HYBRID, &options, &results, &count) == KC_EMBDEX_OK) {
-    kc_embdex_free(results);
-}
-```
-
-## JavaScript projection
-
-The intended JavaScript-facing shape is:
-
-```javascript
-const index = await embdex.build([
-    { id: "file-a", content: "Authentication between peers" },
-    { id: "file-a", content: "Exchanging public keys" }
-]);
-
-await index.save("corpus.bin");
-const matches = await index.search("secure peer communication", {
-    mode: "hybrid",
-    limit: 5
-});
-await index.close();
-
-const restored = await embdex.open("corpus.bin");
-const results = await restored.search("encryption");
-await restored.close();
-```
-
-This is the conceptual projection of the C API. The native project does not
-bundle a JavaScript engine or runtime-specific binding.
+Further stages will add vocabulary-based spelling recovery, phrase
+matching, evidence accumulation, and resource-aware candidate selection.
+Those stages do not change the intent-level public API.
 
 ## CLI
 
-Build reads one tab-separated pair per line from standard input or a file:
+Build reads tab-separated ID/content associations from standard input
+or a file:
 
 ```sh
 embdex build corpus.bin -i documents.tsv
 printf 'doc-1\tAuthentication between peers\n' | embdex build corpus.bin
 ```
 
-The first tab separates the ID and content. Blank lines are ignored. Each
-nonblank row requires nonempty ID and content. Embedded tabs, embedded newlines,
-and binary NUL bytes are not supported by the CLI text input. The library API
-does not impose the tab-separated input representation.
+The first tab separates ID from content. Blank lines are ignored;
+nonblank lines must contain nonempty ID and content. Embedded tabs,
+line breaks and binary NUL bytes are not supported by the text CLI.
+The C API does not require TSV.
 
-Search an existing binary index:
+Search a saved index:
 
 ```sh
 embdex search corpus.bin "peer authentication"
-embdex search corpus.bin "security" --limit 5 --threshold 0.3
-embdex search corpus.bin "peer authentication" --mode lexical
-embdex search corpus.bin "peer authentication" --mode hybrid
-embdex search corpus.bin "peer authentication" --mode rerank
+embdex search corpus.bin "security" --limit 5
 ```
 
-Each output line uses the same tab delimiter with fields
-`id<TAB>score<TAB>content`. The default mode is `semantic`.
-The CLI writes errors to standard error and exits nonzero on invalid
-input, incompatible indexes, or failed operations.
+Each output row contains ID, score and content separated by tabs.
+Diagnostic messages go to standard error, with a nonzero exit status
+for invalid arguments or failed operations. -h/--help and
+-v/--version follow the standard kclib CLI conventions.
 
 ## Next step
 
