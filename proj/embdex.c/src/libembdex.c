@@ -366,6 +366,7 @@ static size_t kc_embdex_variant_choice(const kc_embdex_variant_plan_t *plan,
     if (variant == 0 || choices <= 1) return 0;
     if (plan == NULL || plan->exhaustive)
         return (variant / stride) % choices;
+    if (plan->ambiguous == 1) return variant % choices;
     /* Four staggered bits cover the full sentence within 16 variants. */
     while (((size_t)1 << bits) < plan->count) bits++;
     mask = (size_t)1 << (occurrence % bits);
