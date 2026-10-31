@@ -393,19 +393,23 @@ static size_t kc_embdex_variant_choice(const kc_embdex_variant_plan_t *plan,
  * @param index Index with an initialized BM25 analyzer.
  * @return KC_EMBDEX_OK or an error on invalid mappings and I/O.
  */
-static int kc_embdex_wordmap_load(kc_embdex_t *index)
+/**
+ * Append normalized substitution pairs from one independent TSV file.
+ * File order determines the first translation for repeated source terms.
+ * @param index Writable dictionary destination.
+ * @param path Input TSV file.
+ * @param capacity Current allocated mapping capacity.
+ * @return KC_EMBDEX_OK or an input/memory error.
+ */
+static int kc_embdex_wordmap_read_file(kc_embdex_t *index,
+    const char *path, size_t *capacity)
 {
-    const char *path = getenv("KC_EMBDEX_WORDMAP");
     kc_embdex_word_t *next;
     char line[2048];
-    size_t capacity = 0;
-    FILE *file;
+    FILE *file = fopen(path, "rb");
     int status = KC_EMBDEX_OK;
 
-    if (path == NULL || path[0] == '\0') return KC_EMBDEX_OK;
-    file = fopen(path, "rb");
     if (file == NULL) return KC_EMBDEX_EIO;
-
     while (fgets(line, sizeof(line), file) != NULL) {
         size_t length = strlen(line);
         char *tab;
@@ -432,7 +436,7 @@ static int kc_embdex_wordmap_load(kc_embdex_t *index)
             *p != '\0'; p++)
         {
             if (!((*p >= 'A' && *p <= 'Z') ||
-                (*p >= 'a' && *p <= 'z')))
+                  (*p >= 'a' && *p <= 'z')))
             {
                 status = KC_EMBDEX_EFORMAT;
                 break;
@@ -447,8 +451,8 @@ static int kc_embdex_wordmap_load(kc_embdex_t *index)
             status = KC_EMBDEX_EFORMAT;
             break;
         }
-        if (index->word_count == capacity) {
-            size_t updated = capacity == 0 ? 64 : capacity * 2;
+        if (index->word_count == *capacity) {
+            size_t updated = *capacity == 0 ? 64 : *capacity * 2;
 
             next = (kc_embdex_word_t *)realloc(index->wordmap,
                 updated * sizeof(*next));
@@ -458,7 +462,7 @@ static int kc_embdex_wordmap_load(kc_embdex_t *index)
                 break;
             }
             index->wordmap = next;
-            capacity = updated;
+            *capacity = updated;
         }
         replacement = kc_embdex_copy_string(tab);
         if (replacement == NULL) {
@@ -473,12 +477,103 @@ static int kc_embdex_wordmap_load(kc_embdex_t *index)
     }
     if (ferror(file)) status = KC_EMBDEX_EIO;
     if (fclose(file) != 0) status = KC_EMBDEX_EIO;
-    if (status != KC_EMBDEX_OK) return status;
+    return status;
+}
 
+/**
+ * Merge independent word-replacement tables without assigning them languages
+ * or any semantic metadata. Only exact duplicate pairs are discarded.
+ * @param index Index with an initialized BM25 analyzer.
+ * @param paths Explicit dictionary paths, in preference order.
+ * @param count Number of explicit dictionaries.
+ * @return KC_EMBDEX_OK or a format, memory or file error.
+ */
+static int kc_embdex_wordmap_load(kc_embdex_t *index,
+    const char *const *paths, size_t count)
+{
+    size_t capacity = 0;
+    const char *legacy = getenv("KC_EMBDEX_WORDMAP");
+    int status;
+
+    if (count == 0) {
+        if (legacy == NULL || legacy[0] == '\0') return KC_EMBDEX_OK;
+        paths = &legacy;
+        count = 1;
+    } else if (paths == NULL) {
+        return KC_EMBDEX_EINVAL;
+    }
+    for (size_t i = 0; i < count; i++) {
+        if (paths[i] == NULL || paths[i][0] == '\0')
+            return KC_EMBDEX_EINVAL;
+        status = kc_embdex_wordmap_read_file(index,
+            paths[i], &capacity);
+        if (status != KC_EMBDEX_OK) return status;
+    }
     qsort(index->wordmap, index->word_count, sizeof(*index->wordmap),
         kc_embdex_word_compare);
+    {
+        size_t retained = 0;
+
+        for (size_t i = 0; i < index->word_count; i++) {
+            int duplicate = 0;
+
+            for (size_t j = retained; j > 0; j--) {
+                if (strcmp(index->wordmap[j - 1].source,
+                    index->wordmap[i].source) != 0)
+                    break;
+                if (strcmp(index->wordmap[j - 1].replacement,
+                    index->wordmap[i].replacement) == 0) {
+                    duplicate = 1;
+                    break;
+                }
+            }
+            if (duplicate) {
+                free(index->wordmap[i].source);
+                free(index->wordmap[i].replacement);
+            } else {
+                if (retained != i)
+                    index->wordmap[retained] = index->wordmap[i];
+                retained++;
+            }
+        }
+        index->word_count = retained;
+    }
     return KC_EMBDEX_OK;
 }
+
+/**
+ * Identify explicit dictionary content without depending on filenames.
+ * All source/target pairs contribute in their deterministic merged order.
+ * @param index Index whose wordmap has been loaded.
+ * @return KC_EMBDEX_OK or a formatting error.
+ */
+static int kc_embdex_wordmap_identity(kc_embdex_t *index)
+{
+    uint32_t hash = UINT32_C(2166136261);
+    int written;
+
+    for (size_t i = 0; i < index->word_count; i++) {
+        const unsigned char *parts[2] = {
+            (const unsigned char *)index->wordmap[i].source,
+            (const unsigned char *)index->wordmap[i].replacement
+        };
+
+        for (size_t j = 0; j < 2; j++) {
+            for (const unsigned char *p = parts[j]; *p != 0; p++) {
+                hash ^= *p;
+                hash *= UINT32_C(16777619);
+            }
+            hash ^= 0;
+            hash *= UINT32_C(16777619);
+        }
+    }
+    memset(index->model_tag, 0, sizeof(index->model_tag));
+    written = snprintf(index->model_tag, sizeof(index->model_tag),
+        "%s+%08" PRIx32, kc_embdex_model, hash);
+    return written < 0 || (size_t)written >= sizeof(index->model_tag) ?
+        KC_EMBDEX_EFORMAT : KC_EMBDEX_OK;
+}
+
 
 /**
  * Identify word bytes without treating punctuation as part of a word.
@@ -823,7 +918,9 @@ static int kc_embdex_prepare_mapped_lexical(kc_embdex_t *index)
 static int kc_embdex_create(
     kc_embdex_t **out,
     const kc_embdex_document_t *documents,
-    size_t count
+    size_t count,
+    const char *const *dictionaries,
+    size_t dictionary_count
 )
 {
     kc_embdex_t *index;
@@ -846,8 +943,12 @@ static int kc_embdex_create(
     if (index == NULL) {
         return KC_EMBDEX_ENOMEM;
     }
-    status = kc_embdex_model_identity(index->model_tag);
-    if (status != KC_EMBDEX_OK) goto failure;
+    if (dictionary_count == 0) {
+        status = kc_embdex_model_identity(index->model_tag);
+        if (status != KC_EMBDEX_OK) goto failure;
+    } else {
+        memcpy(index->model_tag, kc_embdex_model, sizeof(kc_embdex_model));
+    }
     status = KC_EMBDEX_EEMBED;
     index->dimension = kc_emb_dimension();
     if (index->dimension == 0 ||
@@ -869,8 +970,13 @@ static int kc_embdex_create(
     }
     status = kc_embdex_prepare_lexical(index);
     if (status != KC_EMBDEX_OK) goto failure;
-    status = kc_embdex_wordmap_load(index);
+    status = kc_embdex_wordmap_load(index,
+        dictionaries, dictionary_count);
     if (status != KC_EMBDEX_OK) goto failure;
+    if (dictionary_count > 0 && index->word_count > 0) {
+        status = kc_embdex_wordmap_identity(index);
+        if (status != KC_EMBDEX_OK) goto failure;
+    }
     status = kc_embdex_prepare_mapped_lexical(index);
     if (status != KC_EMBDEX_OK) goto failure;
     for (size_t i = 0; i < count; i++) {
@@ -1178,7 +1284,7 @@ int kc_embdex_open(kc_embdex_t **out, const char *path)
         if (status == KC_EMBDEX_OK)
             status = kc_embdex_load_wordmap(index);
     } else if (status == KC_EMBDEX_OK) {
-        status = kc_embdex_wordmap_load(index);
+        status = kc_embdex_wordmap_load(index, NULL, 0);
     }
     if (status == KC_EMBDEX_OK && index->count > KC_EMBDEX_EXACT_LIMIT)
         status = kc_embdex_prepare_graph(index);
@@ -1402,18 +1508,29 @@ finished:
  * @param count Number of associations.
  * @return KC_EMBDEX_OK or a negative error code.
  */
-int kc_embdex_build(const char *path,
-    const kc_embdex_document_t *documents, size_t count)
+int kc_embdex_build_with_dictionaries(const char *path,
+    const kc_embdex_document_t *documents, size_t count,
+    const char *const *dictionaries, size_t dictionary_count)
 {
     kc_embdex_t *index = NULL;
     int status;
 
-    if (path == NULL || path[0] == '\0') return KC_EMBDEX_EINVAL;
-    status = kc_embdex_create(&index, documents, count);
+    if (path == NULL || path[0] == '\0' ||
+        (dictionary_count > 0 && dictionaries == NULL))
+        return KC_EMBDEX_EINVAL;
+    status = kc_embdex_create(&index, documents, count,
+        dictionaries, dictionary_count);
     if (status != KC_EMBDEX_OK) return status;
     status = kc_embdex_save(index, path);
     kc_embdex_close(index);
     return status;
+}
+
+int kc_embdex_build(const char *path,
+    const kc_embdex_document_t *documents, size_t count)
+{
+    return kc_embdex_build_with_dictionaries(
+        path, documents, count, NULL, 0);
 }
 
 typedef struct {
