@@ -2138,10 +2138,10 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                 size_t candidates = 0;
 
                 for (size_t i = 0; i < index->count; i++) {
+                    evidence[i].variants_evaluated = unique_variants;
                     if (!evidence[i].semantic_measured) continue;
                     ranks[candidates].ordinal = i;
                     ranks[candidates++].score = evidence[i].semantic;
-                    evidence[i].variants_evaluated = unique_variants;
                 }
                 qsort(ranks, candidates, sizeof(*ranks),
                     kc_embdex_rank_compare);
