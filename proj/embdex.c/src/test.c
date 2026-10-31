@@ -22,9 +22,9 @@
 #endif
 
 #ifdef __EMSCRIPTEN__
-#define KC_TEST_TOTAL 4
-#else
 #define KC_TEST_TOTAL 6
+#else
+#define KC_TEST_TOTAL 8
 #endif
 
 static int kc_test_current = 0;
@@ -202,6 +202,102 @@ static int kc_test_format(void)
         "rejects corrupt persisted data without partial handles", failed);
 }
 
+typedef struct {
+    size_t count;
+    double first;
+    char first_id[64];
+} kc_embdex_match_test_t;
+
+/**
+ * Inspect one retrieved association for result ranking assertions.
+ * @param result Borrowed ranked association.
+ * @param userdata Mutable observations.
+ * @return Zero to continue collecting.
+ */
+static int kc_test_match(const kc_embdex_result_t *result, void *userdata)
+{
+    kc_embdex_match_test_t *state = (kc_embdex_match_test_t *)userdata;
+
+    if (state->count == 0) {
+        size_t size = strlen(result->id);
+
+        if (size >= sizeof(state->first_id)) return 1;
+        memcpy(state->first_id, result->id, size + 1);
+        state->first = result->score;
+    }
+    state->count++;
+    return 0;
+}
+
+/**
+ * Verify phrase coverage and Unicode spelling alternatives over dataset words.
+ * @return Zero when recovered associations outrank partial matches.
+ */
+static int kc_test_relevance(void)
+{
+    const kc_embdex_document_t documents[] = {
+        {"meatball", "Albóndigas caseras con salsa de tomate"},
+        {"pasta", "Pasta con salsa de tomate"},
+        {"cutlet", "Milanesa con puré"}
+    };
+    kc_embdex_t *index = NULL;
+    kc_embdex_match_test_t result = {0};
+    const char *path = "embdex-test-relevance.bin";
+    int failed = 0;
+
+    remove(path);
+    failed |= kc_embdex_build(path, documents, 3) != KC_EMBDEX_OK;
+    if (!failed)
+        failed |= kc_embdex_open(&index, path) != KC_EMBDEX_OK;
+    if (!failed) {
+        failed |= kc_embdex_search(index, "almondigas caseras", NULL,
+            kc_test_match, &result) != KC_EMBDEX_OK;
+        failed |= result.count == 0 ||
+            strcmp(result.first_id, "meatball") != 0;
+        result = (kc_embdex_match_test_t){0};
+        failed |= kc_embdex_search(index, "salsa de tomate", NULL,
+            kc_test_match, &result) != KC_EMBDEX_OK;
+        failed |= result.count == 0 ||
+            strcmp(result.first_id, "pasta") != 0;
+    }
+    kc_embdex_close(index);
+    remove(path);
+    return kc_test_result("relevance",
+        "recovers misspellings and full phrases before partial matches", failed);
+}
+
+/**
+ * Validate empty queries and malformed Unicode before dispatching inference.
+ * @return Zero when invalid or empty text cannot generate spurious results.
+ */
+static int kc_test_query(void)
+{
+    const kc_embdex_document_t documents[] = {
+        {"one", "Welcome to the project"}
+    };
+    const char *path = "embdex-test-query.bin";
+    kc_embdex_match_test_t result = {0};
+    kc_embdex_t *index = NULL;
+    int failed = 0;
+
+    remove(path);
+    failed |= kc_embdex_build(path, documents, 1) != KC_EMBDEX_OK;
+    if (!failed)
+        failed |= kc_embdex_open(&index, path) != KC_EMBDEX_OK;
+    if (!failed) {
+        failed |= kc_embdex_search(index, "", NULL,
+            kc_test_match, &result) != KC_EMBDEX_OK;
+        failed |= result.count != 0;
+        failed |= kc_embdex_search(index, "\xC3\x28", NULL,
+            kc_test_match, &result) != KC_EMBDEX_ELEXICAL;
+        failed |= result.count != 0;
+    }
+    kc_embdex_close(index);
+    remove(path);
+    return kc_test_result("query",
+        "does not match empty text and rejects malformed UTF-8", failed);
+}
+
 #ifndef __EMSCRIPTEN__
 /**
  * Check conventional CLI help and build-version output.
@@ -307,6 +403,8 @@ static int kc_test_run(const char *name)
     if (strcmp(name, "duplicates") == 0) return kc_test_duplicates();
     if (strcmp(name, "invalid") == 0) return kc_test_invalid();
     if (strcmp(name, "format") == 0) return kc_test_format();
+    if (strcmp(name, "relevance") == 0) return kc_test_relevance();
+    if (strcmp(name, "query") == 0) return kc_test_query();
 #ifndef __EMSCRIPTEN__
     if (strcmp(name, "cli_info") == 0) return kc_test_cli_info();
     if (strcmp(name, "cli") == 0) return kc_test_cli();
@@ -325,6 +423,7 @@ int main(int argc, char **argv)
 {
     const char *cases[] = {
         "search", "duplicates", "invalid", "format",
+        "relevance", "query",
 #ifndef __EMSCRIPTEN__
         "cli_info", "cli",
 #endif
