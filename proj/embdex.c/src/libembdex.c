@@ -1050,7 +1050,8 @@ static double kc_embdex_semantic_threshold(const kc_embdex_t *index,
 
     if (sample_count < 5) return threshold;
     for (size_t i = 0; i < sample_count; i++) {
-        size_t ordinal = i * index->count / sample_count;
+        size_t ordinal = (index->count / sample_count) * i +
+            ((index->count % sample_count) * i) / sample_count;
 
         similarities[i] = kc_embdex_cosine(index, ordinal, query);
     }
