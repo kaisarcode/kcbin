@@ -432,17 +432,16 @@ static int kc_embdex_wordmap_read_file(kc_embdex_t *index,
             break;
         }
         *tab++ = '\0';
-        for (const unsigned char *p = (const unsigned char *)tab;
-            *p != '\0'; p++)
+        /* Both columns are words. The analyzer validates UTF-8 and
+         * word boundaries; no language or alphabet is hardcoded. */
         {
-            if (!((*p >= 'A' && *p <= 'Z') ||
-                  (*p >= 'a' && *p <= 'z')))
-            {
-                status = KC_EMBDEX_EFORMAT;
-                break;
-            }
+            char *validated = NULL;
+
+            status = kc_embdex_word_normalize(index, tab,
+                strlen(tab), &validated);
+            free(validated);
+            if (status != KC_EMBDEX_OK) break;
         }
-        if (status != KC_EMBDEX_OK) break;
         status = kc_embdex_word_normalize(index,
             line, strlen(line), &normalized);
         if (status != KC_EMBDEX_OK) break;
