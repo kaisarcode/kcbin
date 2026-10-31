@@ -207,10 +207,11 @@ static int embdex_parse_records(
 
 typedef struct {
     unsigned last;
+    int active;
 } embdex_progress_t;
 
 /**
- * Report build stages and every tenth of the embedding work on stderr.
+ * Report build stages and each percent of embedding work on stderr.
  * @param stage Current library build stage.
  * @param completed Number of associations embedded in this stage.
  * @param total Total associations to embed.
@@ -229,21 +230,29 @@ static void embdex_progress(kc_embdex_build_stage_t stage,
     case KC_EMBDEX_BUILD_EMBED:
         if (total == 0) {
             if (state->last != 0) {
-                fprintf(stderr, "embdex: embeddings 0/0\n");
+                fprintf(stderr, "\rembdex: embeddings 0/0");
                 state->last = 0;
+                state->active = 1;
+                fflush(stderr);
             }
         } else {
-            unsigned step = (unsigned)((double)completed * 10.0 /
+            unsigned percent = (unsigned)((double)completed * 100.0 /
                 (double)total);
 
-            if (step != state->last) {
-                fprintf(stderr, "embdex: embeddings %u%% (%zu/%zu)\n",
-                    step * 10, completed, total);
-                state->last = step;
+            if (percent != state->last) {
+                fprintf(stderr, "\rembdex: embeddings %u%% (%zu/%zu)",
+                    percent, completed, total);
+                state->last = percent;
+                state->active = 1;
+                fflush(stderr);
             }
         }
         break;
     case KC_EMBDEX_BUILD_SAVE:
+        if (state->active) {
+            fputc('\n', stderr);
+            state->active = 0;
+        }
         fprintf(stderr, "embdex: saving\n");
         break;
     case KC_EMBDEX_BUILD_DONE:
@@ -269,7 +278,7 @@ static int embdex_build(const char *path, const char *input,
     size_t buffer_size = 0;
     size_t count = 0;
     kc_embdex_document_t *documents = NULL;
-    embdex_progress_t state = { .last = 11 };
+    embdex_progress_t state = { .last = 101 };
     kc_embdex_build_options_t options = {
         .progress = embdex_progress,
         .userdata = &state
@@ -296,6 +305,7 @@ static int embdex_build(const char *path, const char *input,
     status = kc_embdex_build_with_dictionaries(path, documents, count,
         dictionaries, dictionary_count, progress ? &options : NULL);
     if (status != KC_EMBDEX_OK) {
+        if (state.active) fputc('\n', stderr);
         fprintf(stderr, "embdex: %s\n", kc_embdex_strerror(status));
         goto finished;
     }
