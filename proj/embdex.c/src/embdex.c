@@ -27,16 +27,14 @@ static void embdex_usage(const char *name)
     printf("Usage: %s <command> <index> [options]\n", name);
     printf("\n");
     printf("Commands:\n");
-    printf("  build <index>          Build an index from TSV associations\n");
-    printf("  search <index> <query> Search indexed associations\n");
+    printf("  build <index>           Build an index from TSV associations\n");
+    printf("  search <index> <query>  Find relevant associations\n");
     printf("\n");
     printf("Options:\n");
-    printf("  -i, --input <file>     Read associations from file (default: stdin)\n");
-    printf("  -l, --limit <N>        Maximum results (default: 10)\n");
-    printf("  -t, --threshold <N>    Minimum cosine similarity (default: -1)\n");
-    printf("  -m, --mode <mode>      semantic, lexical, hybrid, rerank (default: semantic)\n");
-    printf("  -h, --help             Show this help\n");
-    printf("  -v, --version          Show version\n");
+    printf("  -i, --input <file>      Read associations from file (default: stdin)\n");
+    printf("  -l, --limit <N>         Maximum results (default: 10)\n");
+    printf("  -h, --help              Show this help\n");
+    printf("  -v, --version           Show version\n");
 }
 
 /**
@@ -61,46 +59,6 @@ static int embdex_parse_limit(const char *text, size_t *out)
         return 1;
     }
     *out = (size_t)value;
-    return 0;
-}
-
-/**
- * Parse a finite cosine similarity threshold.
- * @param text Argument to parse.
- * @param out Receives the cosine threshold.
- * @return Zero on success, nonzero on invalid input.
- */
-static int embdex_parse_threshold(const char *text, double *out)
-{
-    double value;
-    char *end;
-
-    if (text == NULL || text[0] == '\0') {
-        return 1;
-    }
-    errno = 0;
-    value = strtod(text, &end);
-    if (errno != 0 || end == text || *end != '\0' ||
-        !isfinite(value) || value < -1.0 || value > 1.0) {
-        return 1;
-    }
-    *out = value;
-    return 0;
-}
-
-/**
- * Resolve one public search-mode name.
- * @param name User-supplied mode text.
- * @param out Receives the selected mode constant.
- * @return Zero when the mode is supported, otherwise one.
- */
-static int embdex_parse_mode(const char *name, int *out)
-{
-    if (strcmp(name, "semantic") == 0) *out = KC_EMBDEX_MODE_SEMANTIC;
-    else if (strcmp(name, "lexical") == 0) *out = KC_EMBDEX_MODE_LEXICAL;
-    else if (strcmp(name, "hybrid") == 0) *out = KC_EMBDEX_MODE_HYBRID;
-    else if (strcmp(name, "rerank") == 0) *out = KC_EMBDEX_MODE_RERANK;
-    else return 1;
     return 0;
 }
 
@@ -258,7 +216,6 @@ static int embdex_build(const char *path, const char *input)
     size_t buffer_size = 0;
     size_t count = 0;
     kc_embdex_document_t *documents = NULL;
-    kc_embdex_t *index = NULL;
     int status;
     int result = 1;
 
@@ -278,10 +235,7 @@ static int embdex_build(const char *path, const char *input)
         fprintf(stderr, "embdex: invalid tab-separated input\n");
         goto finished;
     }
-    status = kc_embdex_build(&index, documents, count);
-    if (status == KC_EMBDEX_OK) {
-        status = kc_embdex_save(index, path);
-    }
+    status = kc_embdex_build(path, documents, count);
     if (status != KC_EMBDEX_OK) {
         fprintf(stderr, "embdex: %s\n", kc_embdex_strerror(status));
         goto finished;
@@ -289,80 +243,75 @@ static int embdex_build(const char *path, const char *input)
     result = 0;
 
 finished:
-    kc_embdex_close(index);
     free(documents);
     free(buffer);
     return result;
 }
 
 /**
- * Query an existing binary index and print tab-separated matches.
- * @param path Source binary index.
- * @param query Natural-language query.
- * @param limit Maximum number of returned matches.
- * @param threshold Minimum cosine similarity score.
- * @param mode Search strategy, defaulting to semantic.
- * @return Process exit status.
+ * Print one borrowed search result in the CLI output format.
+ * @param result Matching association.
+ * @param userdata Unused caller context.
+ * @return Zero on success, nonzero when output fails.
  */
-static int embdex_search(
-    const char *path,
-    const char *query,
-    size_t limit,
-    double threshold,
-    int mode
+static int embdex_print_result(
+    const kc_embdex_result_t *result,
+    void *userdata
 )
 {
-    kc_embdex_t *index = NULL;
-    kc_embdex_result_t *results = NULL;
-    size_t count = 0;
-    kc_embdex_search_options_t options = {
-        .limit = &limit,
-        .threshold = &threshold
-    };
-    int status;
-    int result = 1;
-
-    status = kc_embdex_open(&index, path);
-    if (status == KC_EMBDEX_OK) {
-        status = kc_embdex_search_mode(
-            index, query, mode, &options, &results, &count
-        );
-    }
-    if (status != KC_EMBDEX_OK) {
-        fprintf(stderr, "embdex: %s\n", kc_embdex_strerror(status));
-        goto finished;
-    }
-    for (size_t i = 0; i < count; i++) {
-        if (printf("%s\t%.12g\t%s\n",
-            results[i].id, results[i].score, results[i].content) < 0) {
-            goto finished;
-        }
-    }
-    result = fflush(stdout) == 0 ? 0 : 1;
-
-finished:
-    kc_embdex_free(results);
-    kc_embdex_close(index);
-    return result;
+    (void)userdata;
+    return printf("%s\t%.12g\t%s\n",
+        result->id, result->score, result->content) < 0;
 }
 
 /**
+ * Search an index and print ordered associations.
+ * @param path Saved index location.
+ * @param query User query.
+ * @param limit Maximum result count.
+ * @return Process status.
+ */
+static int embdex_search(const char *path, const char *query, size_t limit)
+{
+    kc_embdex_t *index = NULL;
+    kc_embdex_search_options_t options = { .limit = &limit };
+    int status;
+
+    status = kc_embdex_open(&index, path);
+    if (status == KC_EMBDEX_OK)
+        status = kc_embdex_search(index, query, &options,
+            embdex_print_result, NULL);
+    kc_embdex_close(index);
+    if (status != KC_EMBDEX_OK) {
+        fprintf(stderr, "embdex: %s\n", kc_embdex_strerror(status));
+        return 1;
+    }
+    return fflush(stdout) == 0 ? 0 : 1;
+}
+
+
  * Dispatch the semantic index CLI commands.
  * @param argc Number of command-line arguments.
  * @param argv Command-line argument vector.
  * @return Process exit status.
  */
+/**
+ * Dispatch the CLI operations on persistent indexes.
+ * @param argc Argument count.
+ * @param argv Command-line arguments.
+ * @return Process exit status.
+ */
 int main(int argc, char **argv)
 {
-    if (argc == 2 &&
-        (strcmp(argv[1], "-h") == 0 ||
-        strcmp(argv[1], "--help") == 0)) {
+    if (argc == 2 && (strcmp(argv[1], "-h") == 0 ||
+        strcmp(argv[1], "--help") == 0))
+    {
         embdex_usage(argv[0]);
         return 0;
     }
-    if (argc == 2 &&
-        (strcmp(argv[1], "-v") == 0 ||
-        strcmp(argv[1], "--version") == 0)) {
+    if (argc == 2 && (strcmp(argv[1], "-v") == 0 ||
+        strcmp(argv[1], "--version") == 0))
+    {
         printf("%" PRIu64 "\n", kc_embdex_version());
         return 0;
     }
@@ -376,7 +325,8 @@ int main(int argc, char **argv)
         for (int i = 3; i < argc; i++) {
             if ((strcmp(argv[i], "-i") == 0 ||
                 strcmp(argv[i], "--input") == 0) &&
-                ++i < argc && input == NULL) {
+                ++i < argc && input == NULL)
+            {
                 input = argv[i];
             } else {
                 fprintf(stderr, "embdex: invalid build arguments\n");
@@ -387,30 +337,16 @@ int main(int argc, char **argv)
     }
     if (strcmp(argv[1], "search") == 0 && argc >= 4) {
         size_t limit = 10;
-        double threshold = -1.0;
-        int mode = KC_EMBDEX_MODE_SEMANTIC;
 
         for (int i = 4; i < argc; i++) {
             if ((strcmp(argv[i], "-l") == 0 ||
                 strcmp(argv[i], "--limit") == 0) &&
-                ++i < argc && embdex_parse_limit(argv[i], &limit) == 0) {
+                ++i < argc && embdex_parse_limit(argv[i], &limit) == 0)
                 continue;
-            }
-            if ((strcmp(argv[i], "-t") == 0 ||
-                strcmp(argv[i], "--threshold") == 0) &&
-                ++i < argc &&
-                embdex_parse_threshold(argv[i], &threshold) == 0) {
-                continue;
-            }
-            if ((strcmp(argv[i], "-m") == 0 ||
-                strcmp(argv[i], "--mode") == 0) &&
-                ++i < argc && embdex_parse_mode(argv[i], &mode) == 0) {
-                continue;
-            }
             fprintf(stderr, "embdex: invalid search arguments\n");
             return 1;
         }
-        return embdex_search(argv[2], argv[3], limit, threshold, mode);
+        return embdex_search(argv[2], argv[3], limit);
     }
     fprintf(stderr, "embdex: invalid command\n");
     return 1;
