@@ -349,18 +349,14 @@ static size_t kc_embdex_word_find(const kc_embdex_t *index,
  * Subsequent variants change different words on rotating mixed-radix digits,
  * including cases where multiple words change in one sentence.
  * @param variant Candidate combination ordinal.
- * @param occurrence Zero-based ambiguous word occurrence.
+ * @param stride Mixed-radix weight of this ambiguous word occurrence.
  * @param choices Number of possible translations for the word.
  * @return Translation ordinal.
  */
 static size_t kc_embdex_variant_choice(size_t variant,
-    size_t occurrence, size_t choices)
+    size_t stride, size_t choices)
 {
-    size_t stride = (size_t)1 << (occurrence % 4);
-
-    if (variant == 0 || choices <= 1) return 0;
-    return ((variant / stride) +
-        (occurrence / 4) * (variant % choices)) % choices;
+    return choices > 1 ? (variant / stride) % choices : 0;
 }
 
 /**
@@ -534,24 +530,24 @@ static int kc_embdex_word_append(char **buffer, size_t *used,
  * @param dimension Receives the vector length.
  * @return KC_EMBDEX_OK or an embedding, normalization or memory error.
  */
-static int kc_embdex_embed_text(const kc_embdex_t *index,
-    const char *text, size_t variant, float **vector, size_t *dimension)
+static int kc_embdex_transform_text(const kc_embdex_t *index,
+    const char *text, size_t variant, char **output)
 {
     size_t used = 0, capacity = 0, size = strlen(text), offset = 0;
-    size_t ambiguous = 0;
+    size_t stride = 1;
     char *mapped = NULL;
     int status = KC_EMBDEX_OK;
 
-    if (index->word_count == 0)
-        return kc_emb_embed(text, vector, dimension) == KC_EMB_OK ?
-            KC_EMBDEX_OK : KC_EMBDEX_EEMBED;
-
+    *output = NULL;
+    if (index->word_count == 0) {
+        *output = kc_embdex_copy_string(text);
+        return *output == NULL ? KC_EMBDEX_ENOMEM : KC_EMBDEX_OK;
+    }
     while (offset < size) {
         size_t end = offset;
         const char *replacement = text + offset;
         size_t length;
         char *normalized = NULL;
-
         size_t punctuation = kc_embdex_punctuation_width(
             text + offset, size - offset);
 
@@ -567,18 +563,22 @@ static int kc_embdex_embed_text(const kc_embdex_t *index,
                 end++;
             status = kc_embdex_word_normalize(index,
                 text + offset, end - offset, &normalized);
-            /* Words outside BM25's normalized vocabulary stay unchanged. */
+            /* Non-lexical tokens remain in the original text. */
             if (status == KC_EMBDEX_EFORMAT) status = KC_EMBDEX_OK;
             else if (status != KC_EMBDEX_OK) break;
             if (normalized != NULL) {
                 first = kc_embdex_word_find(index, normalized,
                     &alternatives);
                 if (alternatives != 0) {
-                    size_t selected = kc_embdex_variant_choice(variant,
-                        ambiguous, alternatives);
+                    size_t choice = kc_embdex_variant_choice(variant,
+                        stride, alternatives);
 
-                    replacement = index->wordmap[first + selected].replacement;
-                    if (alternatives > 1) ambiguous++;
+                    replacement = index->wordmap[first + choice].replacement;
+                    if (alternatives > 1) {
+                        /* Only the first sixteen combinations are tested. */
+                        stride = stride > 16 / alternatives ?
+                            16 : stride * alternatives;
+                    }
                 }
             }
         }
@@ -590,13 +590,38 @@ static int kc_embdex_embed_text(const kc_embdex_t *index,
         if (status != KC_EMBDEX_OK) break;
         offset = end;
     }
-    if (status == KC_EMBDEX_OK) {
-        kc_embdex_wordmap_trace(text, mapped == NULL ? text : mapped,
-            variant);
-        status = kc_emb_embed(mapped == NULL ? text : mapped,
-            vector, dimension) == KC_EMB_OK ?
-            KC_EMBDEX_OK : KC_EMBDEX_EEMBED;
+    if (status == KC_EMBDEX_OK && mapped == NULL) {
+        mapped = kc_embdex_copy_string(text);
+        if (mapped == NULL) status = KC_EMBDEX_ENOMEM;
     }
+    if (status == KC_EMBDEX_OK) {
+        *output = mapped;
+        return KC_EMBDEX_OK;
+    }
+    free(mapped);
+    return status;
+}
+
+/**
+ * Embed original or literally substituted words using the selected variant.
+ * The mapped string is temporary and never alters stored document content.
+ * @param index Index with an optional experimental dictionary.
+ * @param text Original input text.
+ * @param variant Bounded word-combination ordinal.
+ * @param vector Receives the owned model embedding.
+ * @param dimension Receives its dimension.
+ * @return KC_EMBDEX_OK or a negative error status.
+ */
+static int kc_embdex_embed_text(const kc_embdex_t *index,
+    const char *text, size_t variant, float **vector, size_t *dimension)
+{
+    char *mapped = NULL;
+    int status = kc_embdex_transform_text(index, text, variant, &mapped);
+
+    if (status != KC_EMBDEX_OK) return status;
+    kc_embdex_wordmap_trace(text, mapped, variant);
+    status = kc_emb_embed(mapped, vector, dimension) == KC_EMB_OK ?
+        KC_EMBDEX_OK : KC_EMBDEX_EEMBED;
     free(mapped);
     return status;
 }
@@ -1647,7 +1672,7 @@ static int kc_embdex_variant_count(const kc_embdex_t *index,
     const kc_embdex_tokens_t *tokens, size_t *count)
 {
     const char *configured = getenv("KC_EMBDEX_WORDMAP_VARIANTS");
-    size_t ambiguous = 0;
+    size_t combinations = 1;
     size_t budget = 8;
 
     *count = 1;
@@ -1664,9 +1689,12 @@ static int kc_embdex_variant_count(const kc_embdex_t *index,
         size_t alternatives = 0;
 
         kc_embdex_word_find(index, tokens->value[i], &alternatives);
-        if (alternatives > 1) ambiguous++;
+        if (alternatives > 1) {
+            combinations = combinations > budget / alternatives ?
+                budget : combinations * alternatives;
+        }
     }
-    if (ambiguous != 0) *count = budget;
+    *count = combinations;
     return KC_EMBDEX_OK;
 }
 
