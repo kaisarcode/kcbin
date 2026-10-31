@@ -74,6 +74,30 @@ int kc_embdex_build(
 );
 
 /**
+ * Compile associations with any number of independent word dictionaries.
+ * Each dictionary is a TSV file of source-word / replacement-word pairs.
+ * Repeated sources provide alternative substitutions; exact duplicate pairs
+ * across files are deduplicated. Earlier files take precedence for the
+ * primary substitution used when compiling vectors and normalized BM25.
+ * The resulting map embeds its merged dictionary and can be opened without
+ * any build inputs. No language labels or per-word semantic metadata are
+ * interpreted.
+ * @param path Destination compiled binary map.
+ * @param documents Input ID/text associations.
+ * @param count Number of associations.
+ * @param dictionaries Array of dictionary file paths, or NULL when empty.
+ * @param dictionary_count Number of dictionary files.
+ * @return KC_EMBDEX_OK or a negative status.
+ */
+int kc_embdex_build_with_dictionaries(
+    const char *path,
+    const kc_embdex_document_t *documents,
+    size_t count,
+    const char *const *dictionaries,
+    size_t dictionary_count
+);
+
+/**
  * Open an existing index for repeated queries.
  * @param out Receives the opened index handle.
  * @param path Path to the index file.
