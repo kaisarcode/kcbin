@@ -24,20 +24,19 @@
  */
 static void embdex_usage(const char *name)
 {
-    printf("Usage: %s build <index.bin> [-i file]\n", name);
-    printf("       %s search <index.bin> <query> [-l N] [-t score] [-m mode]\n", name);
-    printf("       %s -h | -v\n", name);
+    printf("Usage: %s <command> <index> [options]\n", name);
     printf("\n");
-    printf("Build input: one id<TAB>content association per line.\n");
-    printf("Without -i, build reads standard input.\n");
-    printf("Search output: id<TAB>score<TAB>content per line.\n");
+    printf("Commands:\n");
+    printf("  build <index>          Build an index from TSV associations\n");
+    printf("  search <index> <query> Search indexed associations\n");
+    printf("\n");
     printf("Options:\n");
-    printf("  -i, --input <file>  Read associations from a file\n");
-    printf("  -l, --limit <N>     Maximum results (default: 10)\n");
-    printf("  -t, --threshold N  Minimum cosine similarity (default: -1)\n");
-    printf("  -m, --mode <mode>   semantic, lexical, hybrid, rerank (default: semantic)\n");
-    printf("  -h, --help         Show this help\n");
-    printf("  -v, --version      Show build version\n");
+    printf("  -i, --input <file>     Read associations from file (default: stdin)\n");
+    printf("  -l, --limit <N>        Maximum results (default: 10)\n");
+    printf("  -t, --threshold <N>    Minimum cosine similarity (default: -1)\n");
+    printf("  -m, --mode <mode>      semantic, lexical, hybrid, rerank (default: semantic)\n");
+    printf("  -h, --help             Show this help\n");
+    printf("  -v, --version          Show version\n");
 }
 
 /**
