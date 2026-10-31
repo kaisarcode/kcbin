@@ -1611,7 +1611,7 @@ static void kc_embdex_wordmap_trace(const char *original,
 static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
     const kc_embdex_evidence_t *evidence, size_t count,
     double semantic_threshold, const double *variant_scores,
-    size_t variant_count, size_t variant_stride)
+    size_t variant_count, size_t variant_stride, size_t requested_variants)
 {
     const char *path = getenv("KC_EMBDEX_TRACE");
     FILE *file;
@@ -1648,11 +1648,12 @@ static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
         if (item->accepted) fprintf(file, "%.9g", item->score);
         else fputs("null", file);
         fprintf(file, ",\"semantic_rank\":%zu,\"variant\":%zu,"
-            "\"variants_evaluated\":%zu,\"candidate_threshold\":%.9g,"
-            "\"final_rank\":%zu,\"variant_scores\":[",
+            "\"variants_evaluated\":%zu,\"variants_requested\":%zu,"
+            "\"candidate_threshold\":%.9g,\"final_rank\":%zu,"
+            "\"variant_scores\":[",
             item->semantic_rank, item->semantic_variant,
-            item->variants_evaluated, item->semantic_threshold,
-            item->final_rank);
+            item->variants_evaluated, requested_variants,
+            item->semantic_threshold, item->final_rank);
         for (size_t k = 0; k < variant_count; k++) {
             double cosine = variant_scores == NULL ? NAN :
                 variant_scores[i * variant_stride + k];
@@ -2179,14 +2180,14 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
 finished:
     if (status == KC_EMBDEX_OK && evidence != NULL && tokens.count > 0)
         kc_embdex_trace(index, query, evidence, index->count,
-            semantic_only_floor, variant_scores, unique_variants, variants);
+            semantic_only_floor, variant_scores, unique_variants, variants,
+            variants);
     kc_bm25_free(lexical);
     kc_hnsw_free(semantic);
     kc_emb_free(embedding);
     kc_embdex_tokens_close(&tokens);
     free(joined);
-    for (size_t i = 0; i < unique_variants ||
-        (i < 16 && variant_text[i] != NULL); i++)
+    for (size_t i = 0; i < 16; i++)
         free(variant_text[i]);
     free(variant_scores);
     free(evidence);
