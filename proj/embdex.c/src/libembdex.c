@@ -616,8 +616,12 @@ static int kc_embdex_embed_text(const kc_embdex_t *index,
     const char *text, size_t variant, float **vector, size_t *dimension)
 {
     char *mapped = NULL;
-    int status = kc_embdex_transform_text(index, text, variant, &mapped);
+    int status;
 
+    if (index->word_count == 0)
+        return kc_emb_embed(text, vector, dimension) == KC_EMB_OK ?
+            KC_EMBDEX_OK : KC_EMBDEX_EEMBED;
+    status = kc_embdex_transform_text(index, text, variant, &mapped);
     if (status != KC_EMBDEX_OK) return status;
     kc_embdex_wordmap_trace(text, mapped, variant);
     status = kc_emb_embed(mapped, vector, dimension) == KC_EMB_OK ?
@@ -2014,21 +2018,25 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                 char *mapped = NULL;
                 int repeated = 0;
 
-                status = kc_embdex_transform_text(index, query,
-                    variant, &mapped);
-                if (status != KC_EMBDEX_OK) goto finished;
-                for (size_t k = 0; k < unique_variants; k++) {
-                    if (strcmp(mapped, variant_text[k]) == 0) {
-                        repeated = 1;
-                        break;
+                if (index->word_count != 0) {
+                    status = kc_embdex_transform_text(index, query,
+                        variant, &mapped);
+                    if (status != KC_EMBDEX_OK) goto finished;
+                    for (size_t k = 0; k < unique_variants; k++) {
+                        if (strcmp(mapped, variant_text[k]) == 0) {
+                            repeated = 1;
+                            break;
+                        }
                     }
+                    if (repeated) {
+                        free(mapped);
+                        continue;
+                    }
+                    variant_text[unique_variants] = mapped;
+                    kc_embdex_wordmap_trace(query, mapped, variant);
+                } else {
+                    mapped = (char *)query; /* Borrowed only for inference. */
                 }
-                if (repeated) {
-                    free(mapped);
-                    continue;
-                }
-                variant_text[unique_variants] = mapped;
-                kc_embdex_wordmap_trace(query, mapped, variant);
                 status = kc_emb_embed(mapped, &embedding, &dimension) ==
                     KC_EMB_OK ? KC_EMBDEX_OK : KC_EMBDEX_EEMBED;
                 if (status != KC_EMBDEX_OK) goto finished;
