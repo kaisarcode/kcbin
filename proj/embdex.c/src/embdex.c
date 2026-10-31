@@ -33,6 +33,7 @@ static void embdex_usage(const char *name)
     printf("Options:\n");
     printf("  -i, --input <file>      Read associations from file (default: stdin)\n");
     printf("  -d, --dictionary <file> Add word substitutions (repeatable, build only)\n");
+    printf("  -p, --progress          Show build progress on stderr\n");
     printf("  -l, --limit <N>         Maximum results (default: 10)\n");
     printf("  -h, --help              Show this help\n");
     printf("  -v, --version           Show version\n");
@@ -204,22 +205,75 @@ static int embdex_parse_records(
     return 0;
 }
 
+typedef struct {
+    unsigned last;
+} embdex_progress_t;
+
+/**
+ * Report build stages and every tenth of the embedding work on stderr.
+ * @param stage Current library build stage.
+ * @param completed Number of associations embedded in this stage.
+ * @param total Total associations to embed.
+ * @param userdata CLI progress state.
+ * @return None.
+ */
+static void embdex_progress(kc_embdex_build_stage_t stage,
+    size_t completed, size_t total, void *userdata)
+{
+    embdex_progress_t *state = (embdex_progress_t *)userdata;
+
+    switch (stage) {
+    case KC_EMBDEX_BUILD_PREPARE:
+        fprintf(stderr, "embdex: preparing\n");
+        break;
+    case KC_EMBDEX_BUILD_EMBED:
+        if (total == 0) {
+            if (state->last != 0) {
+                fprintf(stderr, "embdex: embeddings 0/0\n");
+                state->last = 0;
+            }
+        } else {
+            unsigned step = (unsigned)((double)completed * 10.0 /
+                (double)total);
+
+            if (step != state->last) {
+                fprintf(stderr, "embdex: embeddings %u%% (%zu/%zu)\n",
+                    step * 10, completed, total);
+                state->last = step;
+            }
+        }
+        break;
+    case KC_EMBDEX_BUILD_SAVE:
+        fprintf(stderr, "embdex: saving\n");
+        break;
+    case KC_EMBDEX_BUILD_DONE:
+        fprintf(stderr, "embdex: done\n");
+        break;
+    }
+}
+
 /**
  * Create a binary index from a file or standard input.
  * @param path Destination binary index.
  * @param input Optional text input file path.
  * @param dictionaries Ordered dictionary file paths.
  * @param dictionary_count Number of dictionaries.
+ * @param progress Nonzero to report build progress on stderr.
  * @return Process exit status.
  */
 static int embdex_build(const char *path, const char *input,
-    const char *const *dictionaries, size_t dictionary_count)
+    const char *const *dictionaries, size_t dictionary_count, int progress)
 {
     FILE *file = stdin;
     char *buffer = NULL;
     size_t buffer_size = 0;
     size_t count = 0;
     kc_embdex_document_t *documents = NULL;
+    embdex_progress_t state = { .last = 11 };
+    kc_embdex_build_options_t options = {
+        .progress = embdex_progress,
+        .userdata = &state
+    };
     int status;
     int result = 1;
 
@@ -240,7 +294,7 @@ static int embdex_build(const char *path, const char *input,
         goto finished;
     }
     status = kc_embdex_build_with_dictionaries(path, documents, count,
-        dictionaries, dictionary_count);
+        dictionaries, dictionary_count, progress ? &options : NULL);
     if (status != KC_EMBDEX_OK) {
         fprintf(stderr, "embdex: %s\n", kc_embdex_strerror(status));
         goto finished;
@@ -325,6 +379,7 @@ int main(int argc, char **argv)
         const char *input = NULL;
         const char **dictionaries = NULL;
         size_t dictionary_count = 0;
+        int progress = 0;
         int result;
 
         if (argc > 3) {
@@ -346,6 +401,10 @@ int main(int argc, char **argv)
                 i + 1 < argc)
             {
                 dictionaries[dictionary_count++] = argv[++i];
+            } else if ((strcmp(argv[i], "-p") == 0 ||
+                strcmp(argv[i], "--progress") == 0) && !progress)
+            {
+                progress = 1;
             } else {
                 fprintf(stderr, "embdex: invalid build arguments\n");
                 free(dictionaries);
@@ -353,7 +412,7 @@ int main(int argc, char **argv)
             }
         }
         result = embdex_build(argv[2], input,
-            dictionaries, dictionary_count);
+            dictionaries, dictionary_count, progress);
         free(dictionaries);
         return result;
     }
