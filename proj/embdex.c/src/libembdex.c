@@ -1045,8 +1045,7 @@ static int kc_embdex_load_wordmap(kc_embdex_t *index)
         return KC_EMBDEX_EFORMAT;
     count = kc_embdex_read_u32(data + offset);
     offset += 4;
-    if (count == 0 || count > 4096 ||
-        count > SIZE_MAX / sizeof(*index->wordmap))
+    if (count == 0 || count > 4096)
         return KC_EMBDEX_EFORMAT;
     index->wordmap = (kc_embdex_word_t *)calloc(count,
         sizeof(*index->wordmap));
