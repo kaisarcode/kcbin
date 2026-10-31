@@ -38,7 +38,7 @@ static void embdex_usage(const char *name)
 }
 
 /**
- * Parse a strictly positive decimal result limit.
+ * Parse a nonnegative decimal result limit.
  * @param text Argument to parse.
  * @param out Receives the validated limit.
  * @return Zero on success, nonzero on invalid input.
@@ -55,7 +55,7 @@ static int embdex_parse_limit(const char *text, size_t *out)
     errno = 0;
     value = strtoull(text, &end, 10);
     if (errno != 0 || end == text || *end != '\0' ||
-        value == 0 || (unsigned long long)(size_t)value != value) {
+        (unsigned long long)(size_t)value != value) {
         return 1;
     }
     *out = (size_t)value;
@@ -251,7 +251,7 @@ finished:
 /**
  * Print one borrowed search result in the CLI output format.
  * @param result Matching association.
- * @param userdata Unused caller context.
+ * @param userdata Receives whether output failed.
  * @return Zero on success, nonzero when output fails.
  */
 static int embdex_print_result(
@@ -259,9 +259,11 @@ static int embdex_print_result(
     void *userdata
 )
 {
-    (void)userdata;
-    return printf("%s\t%.12g\t%s\n",
+    int *failed = (int *)userdata;
+
+    *failed = printf("%s\t%.12g\t%s\n",
         result->id, result->score, result->content) < 0;
+    return *failed;
 }
 
 /**
@@ -275,18 +277,19 @@ static int embdex_search(const char *path, const char *query, size_t limit)
 {
     kc_embdex_t *index = NULL;
     kc_embdex_search_options_t options = { .limit = &limit };
+    int output_failed = 0;
     int status;
 
     status = kc_embdex_open(&index, path);
     if (status == KC_EMBDEX_OK)
         status = kc_embdex_search(index, query, &options,
-            embdex_print_result, NULL);
+            embdex_print_result, &output_failed);
     kc_embdex_close(index);
     if (status != KC_EMBDEX_OK) {
         fprintf(stderr, "embdex: %s\n", kc_embdex_strerror(status));
         return 1;
     }
-    return fflush(stdout) == 0 ? 0 : 1;
+    return !output_failed && fflush(stdout) == 0 ? 0 : 1;
 }
 
 /**
