@@ -1165,6 +1165,66 @@ static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
 }
 
 /**
+ * Determine whether independent retrieval evidence justifies a result.
+ * The BM25 rank is a discovery signal, not an acceptance shortcut.
+ * @param item Combined evidence for one association.
+ * @param total_query_tokens Number of normalized query words.
+ * @param exact_count Positions matching the exact vocabulary.
+ * @param corrected_count Positions matching corrected vocabulary words.
+ * @param coverage Corpus-rarity-weighted fraction of justified words.
+ * @param semantic_floor Query-relative acceptance threshold.
+ * @param truncated Whether the query exceeded the lexical token bound.
+ * @return Stable explanation of acceptance, or NULL when rejected.
+ */
+static const char *kc_embdex_accept(const kc_embdex_evidence_t *item,
+    size_t total_query_tokens, size_t exact_count,
+    size_t corrected_count, double coverage,
+    double semantic_floor, int truncated)
+{
+    double similarity = item->semantic_found ? item->semantic : 0;
+
+    if (!truncated && item->full_phrase)
+        return "complete_phrase";
+    if (!truncated && coverage >= 0.80 &&
+        (exact_count + corrected_count >= 2 ||
+            (total_query_tokens == 1 &&
+                exact_count + corrected_count == 1)))
+        return "strong_lexical_coverage";
+    if (item->semantic_found && similarity >= semantic_floor + 0.04)
+        return "strong_semantic_evidence";
+    if (!truncated && item->semantic_found &&
+        similarity >= 0.62 && similarity + 0.02 >= semantic_floor &&
+        coverage >= 0.10 && (exact_count > 0 || corrected_count > 0))
+        return "corroborated_semantic_evidence";
+    return NULL;
+}
+
+/**
+ * Rank accepted associations after the acceptance decision is complete.
+ * BM25 contributes only in proportion to supported lexical coverage.
+ * @param item Evidence for an already accepted association.
+ * @param coverage Rarity-weighted lexical coverage.
+ * @param precision Rarity-weighted exact coverage.
+ * @param corrected_weight Rarity-weighted corrected coverage.
+ * @param phrase_ratio Longest matching phrase relative to query length.
+ * @return Deterministic score used only for sorting accepted matches.
+ */
+static double kc_embdex_score(const kc_embdex_evidence_t *item,
+    double coverage, double precision, double corrected_weight,
+    double phrase_ratio)
+{
+    double bm25 = item->lexical_rank != 0 ?
+        10.0 / (10.0 + (double)item->lexical_rank) : 0.0;
+    double cosine = item->semantic_found ? item->semantic : 0;
+    double score = 0.45 * coverage + 0.25 * precision +
+        0.15 * phrase_ratio + 0.10 * bm25 * coverage +
+        0.50 * cosine - 0.08 * corrected_weight;
+
+    if (item->full_phrase) score += 0.50;
+    return score;
+}
+
+/**
  * Find relevant associations from independent lexical and semantic evidence.
  * Query coverage, phrase matching and edit-distance uncertainty influence
  * selection; a fixed similarity floor excludes weak uncorroborated neighbors.
@@ -1237,6 +1297,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         kc_embdex_post_context_t post = {
             evidence, index->count, i, 0, 0, 0
         };
+        size_t exact_frequency;
         int result = kc_bm25_postings(index->lexical,
             tokens.value[i], kc_embdex_posting_add, &post);
 
@@ -1244,7 +1305,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
             status = KC_EMBDEX_ELEXICAL;
             goto finished;
         }
-        if (post.found == 0) {
+        exact_frequency = post.found;
+        if (exact_frequency == 0) {
             size_t length = kc_embdex_length(tokens.value[i]);
             size_t maximum = length >= 8 ? 2 : length >= 5 ? 1 : 0;
 
@@ -1278,9 +1340,12 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
             }
         }
         {
-            size_t frequency = post.found;
+            size_t frequency = exact_frequency;
             double rarity;
 
+            /* Unknown words have the rarity of a singleton, not infinity.
+             * Fuzzy postings never change the document frequency. */
+            if (frequency == 0) frequency = 1;
             if (frequency > index->count) frequency = index->count;
             rarity = log(1.0 + ((double)(index->count - frequency) + 0.5) /
                 ((double)frequency + 0.5));
@@ -1428,39 +1493,22 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         precise = total_weight > 0 ? weight_exact / total_weight : 0;
         item->coverage = coverage;
         item->precision = precise;
-        double bm25 = item->lexical_rank != 0 ?
-            10.0 / (10.0 + (double)item->lexical_rank) : 0.0;
-        double semantic_score = item->semantic_found ?
-            item->semantic : 0.0;
         double score;
-        int accepted;
+        const char *reason = kc_embdex_accept(item, tokens.count,
+            exact, corrected, coverage, semantic_only_floor,
+            tokens.truncated);
 
-        accepted = item->full_phrase ||
-            (!tokens.truncated && exact == tokens.count) ||
-            (coverage >= 0.5 && (exact > 0 || corrected > 0)) ||
-            (item->semantic_found &&
-                semantic_score >= semantic_only_floor) ||
-            (item->semantic_found && semantic_score >= semantic_floor &&
-                (exact > 0 || corrected > 0 || item->lexical_rank != 0)) ||
-            (tokens.count == 1 && corrected > 0);
-        if (tokens.truncated)
-            accepted = item->semantic_found &&
-                semantic_score >= semantic_only_floor;
-        if (!accepted) {
+        if (reason == NULL) {
             item->reason = mask != 0 || item->lexical_rank != 0 ||
                 item->semantic_found ? "insufficient_evidence" :
                 "not_discovered";
             continue;
         }
-
         item->accepted = 1;
-        item->reason = "accepted";
-        score = 0.45 * coverage + 0.25 * precise +
-            0.15 * phrase + 0.10 * bm25 +
-            0.50 * semantic_score -
-            0.08 * (total_weight > 0 ?
-                weight_corrected / total_weight : 0);
-        if (item->full_phrase) score += 0.5;
+        item->reason = reason;
+        score = kc_embdex_score(item, coverage, precise,
+            total_weight > 0 ? weight_corrected / total_weight : 0,
+            phrase);
         item->score = score;
         ranks[rank_count].ordinal = i;
         ranks[rank_count++].score = score;
