@@ -11,13 +11,13 @@ without referring to the original dataset or dictionary.
 
 ## Format
 
-The file uses little-endian integer fields and one format version 3
+The file uses little-endian integer fields and one V1 format
 with a 104-byte header, whether or not dictionaries are present:
 
 | Offset | Size | Value |
 | :--- | ---: | :--- |
 | 0 | 8 | `KCEMBDX\\n` magic bytes |
-| 8 | 4 | Format version (3) |
+| 8 | 4 | Format version (1) |
 | 12 | 4 | Vector dimension |
 | 16 | 8 | Number of associations |
 | 24 | 32 | Model identity and dictionary fingerprint |
@@ -52,8 +52,8 @@ dimensions, dictionary structure, and the embedded dictionary fingerprint.
 The fingerprint detects inconsistent dictionary metadata; it is not a
 cryptographic signature.
 
-Only format version 3 is supported. Rebuild every older map from its source
-associations and dictionaries after updating the library.
+Only V1 is supported during development. Rebuild existing maps from
+source associations and dictionaries whenever the format changes.
 
 ## Memory and persistence
 
