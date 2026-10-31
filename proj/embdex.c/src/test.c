@@ -206,7 +206,7 @@ static int kc_test_format(void)
                 sizeof(header);
             failed |= fclose(file) != 0;
             if (!failed)
-                failed |= header[8] != 3 || header[9] != 0 ||
+                failed |= header[8] != 1 || header[9] != 0 ||
                     header[10] != 0 || header[11] != 0;
         }
     }
@@ -241,7 +241,7 @@ static int kc_test_format(void)
     kc_embdex_close(index);
     remove(path);
     return kc_test_result("format",
-        "uses one format and rejects obsolete or corrupt indexes", failed);
+        "writes V1 and rejects invalid or corrupt indexes", failed);
 }
 
 typedef struct {
