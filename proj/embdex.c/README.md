@@ -40,7 +40,8 @@ the original associations, and the precomputed retrieval structures.
 Search only needs the map; it does not load the input TSV files or
 interpret language or regional metadata. All builds produce the same binary
 format, with or without dictionaries. The optional `--progress` flag
-prints build stages and embedding completion every 10% to standard error.
+prints build stages and refreshes embedding progress every 1% on a single
+terminal line through standard error.
 
 ## Native library
 
