@@ -1420,9 +1420,11 @@ typedef struct {
 typedef struct {
     uint64_t exact;
     uint64_t fuzzy;
+    uint64_t mapped;
     uint64_t phrase;
     size_t longest;
     size_t lexical_rank;
+    size_t mapped_rank;
     double semantic;
     double fusion_sum;
     double fusion_rrf;
@@ -1451,6 +1453,7 @@ typedef struct {
     size_t count;
     size_t position;
     int fuzzy;
+    int mapped;
     int failed;
     size_t found;
 } kc_embdex_post_context_t;
@@ -1626,7 +1629,9 @@ static int kc_embdex_posting_add(size_t ordinal, size_t frequency,
         return 1;
     }
     evidence = &context->evidence[ordinal];
-    if (context->fuzzy)
+    if (context->mapped)
+        evidence->mapped |= UINT64_C(1) << context->position;
+    else if (context->fuzzy)
         evidence->fuzzy |= UINT64_C(1) << context->position;
     else
         evidence->exact |= UINT64_C(1) << context->position;
@@ -1914,10 +1919,12 @@ static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
         kc_embdex_json_string(file, index->records[i].content);
         fprintf(file, ",\"exact\":\"%016" PRIx64
             "\",\"fuzzy\":\"%016" PRIx64
+            "\",\"mapped\":\"%016" PRIx64
             "\",\"phrase\":\"%016" PRIx64
-            "\",\"longest\":%zu,\"bm25_rank\":%zu",
-            item->exact, item->fuzzy, item->phrase,
-            item->longest, item->lexical_rank);
+            "\",\"longest\":%zu,\"bm25_rank\":%zu,"
+            "\"mapped_bm25_rank\":%zu",
+            item->exact, item->fuzzy, item->mapped, item->phrase,
+            item->longest, item->lexical_rank, item->mapped_rank);
         fputs(",\"cosine\":", file);
         if (item->semantic_measured)
             fprintf(file, "%.9g", item->semantic);
@@ -2087,14 +2094,18 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     const double semantic_floor = 0.50;
     double semantic_only_floor = 0.58;
     kc_embdex_tokens_t tokens = {0};
+    kc_embdex_tokens_t mapped_tokens = {0};
     kc_embdex_evidence_t *evidence = NULL;
     kc_embdex_rank_t *ranks = NULL;
     kc_bm25_result_t *lexical = NULL;
+    kc_bm25_result_t *mapped_lexical = NULL;
     kc_hnsw_result_t *semantic = NULL;
     kc_bm25_search_options_t lexical_options = {0};
     char *joined = NULL;
+    char *mapped_query = NULL;
     float *embedding = NULL;
     size_t dimension = 0, limit = 10, window, lexical_count = 0;
+    size_t mapped_lexical_count = 0;
     size_t semantic_count = 0, rank_count = 0, variants = 1;
     kc_embdex_variant_plan_t variant_plan = {0};
     size_t unique_variants = 0;
@@ -2142,9 +2153,44 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         goto finished;
     }
 
+    if (index->mapped_lexical != NULL) {
+        int result = kc_embdex_transform_text(index, query, 0,
+            NULL, &mapped_query);
+
+        if (result != KC_EMBDEX_OK) {
+            status = result;
+            goto finished;
+        }
+        result = kc_bm25_tokens(index->mapped_lexical, mapped_query,
+            kc_embdex_token_add, &mapped_tokens);
+        if (mapped_tokens.failed) {
+            status = KC_EMBDEX_ENOMEM;
+            goto finished;
+        }
+        if (result != KC_BM25_OK) {
+            status = KC_EMBDEX_ELEXICAL;
+            goto finished;
+        }
+    }
+    if (index->mapped_lexical != NULL &&
+        mapped_tokens.count == tokens.count && !mapped_tokens.truncated)
+    {
+        for (size_t i = 0; i < mapped_tokens.count; i++) {
+            kc_embdex_post_context_t post = {
+                evidence, index->count, i, 0, 1, 0, 0
+            };
+            int result = kc_bm25_postings(index->mapped_lexical,
+                mapped_tokens.value[i], kc_embdex_posting_add, &post);
+
+            if (result != KC_BM25_OK || post.failed) {
+                status = KC_EMBDEX_ELEXICAL;
+                goto finished;
+            }
+        }
+    }
     for (size_t i = 0; i < tokens.count; i++) {
         kc_embdex_post_context_t post = {
-            evidence, index->count, i, 0, 0, 0
+            evidence, index->count, i, 0, 0, 0, 0
         };
         size_t exact_frequency;
         int result = kc_bm25_postings(index->lexical,
@@ -2212,6 +2258,24 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
             status = result == KC_BM25_ENOMEM ?
                 KC_EMBDEX_ENOMEM : KC_EMBDEX_ELEXICAL;
             goto finished;
+        }
+    }
+    if (index->mapped_lexical != NULL) {
+        int result = kc_bm25_search(index->mapped_lexical,
+            mapped_query, &lexical_options,
+            &mapped_lexical, &mapped_lexical_count);
+
+        if (result != KC_BM25_OK) {
+            status = result == KC_BM25_ENOMEM ?
+                KC_EMBDEX_ENOMEM : KC_EMBDEX_ELEXICAL;
+            goto finished;
+        }
+        for (size_t i = 0; i < mapped_lexical_count; i++) {
+            if (mapped_lexical[i].ordinal >= index->count) {
+                status = KC_EMBDEX_EINDEX;
+                goto finished;
+            }
+            evidence[mapped_lexical[i].ordinal].mapped_rank = i + 1;
         }
     }
     for (size_t i = 0; i < lexical_count; i++) {
@@ -2438,11 +2502,12 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
 
     for (size_t i = 0; i < index->count; i++) {
         kc_embdex_evidence_t *item = &evidence[i];
-        uint64_t mask = item->exact | item->fuzzy | item->phrase;
-        size_t exact = kc_embdex_popcount(item->exact);
+        uint64_t mask = item->exact | item->fuzzy |
+            item->mapped | item->phrase;
+        size_t exact = kc_embdex_popcount(item->exact | item->mapped);
         size_t corrected = kc_embdex_popcount(item->fuzzy & ~item->exact);
         double weight_covered = 0, weight_exact = 0, weight_corrected = 0;
-        double coverage, precise;
+        double coverage, precise, mapped_weight = 0;
         double phrase = (double)item->longest / (double)tokens.count;
 
         for (size_t j = 0; j < tokens.count; j++) {
@@ -2450,11 +2515,14 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
 
             if ((mask & bit) != 0) weight_covered += weights[j];
             if ((item->exact & bit) != 0) weight_exact += weights[j];
-            if ((item->fuzzy & ~item->exact & bit) != 0)
+            if ((item->mapped & ~item->exact & bit) != 0)
+                mapped_weight += weights[j];
+            if ((item->fuzzy & ~(item->exact | item->mapped) & bit) != 0)
                 weight_corrected += weights[j];
         }
         coverage = total_weight > 0 ? weight_covered / total_weight : 0;
-        precise = total_weight > 0 ? weight_exact / total_weight : 0;
+        precise = total_weight > 0 ?
+            (weight_exact + 0.75 * mapped_weight) / total_weight : 0;
         item->coverage = coverage;
         item->precision = precise;
         double score;
@@ -2478,6 +2546,9 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
          * No additional embeddings or external model are needed. */
         if (unique_variants > 1 && item->semantic_found)
             score += 0.20 * (item->fusion_rrf - item->semantic);
+        if (item->mapped_rank != 0)
+            score += 0.05 * coverage *
+                (10.0 / (10.0 + (double)item->mapped_rank));
         item->score = score;
         ranks[rank_count].ordinal = i;
         ranks[rank_count++].score = score;
@@ -2504,10 +2575,13 @@ finished:
             semantic_only_floor, variant_scores, unique_variants, variants,
             variants);
     kc_bm25_free(lexical);
+    kc_bm25_free(mapped_lexical);
     kc_hnsw_free(semantic);
     kc_emb_free(embedding);
     kc_embdex_tokens_close(&tokens);
+    kc_embdex_tokens_close(&mapped_tokens);
     free(joined);
+    free(mapped_query);
     for (size_t i = 0; i < 16; i++)
         free(variant_text[i]);
     free(variant_scores);
