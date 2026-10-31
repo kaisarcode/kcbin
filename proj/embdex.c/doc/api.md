@@ -169,7 +169,7 @@ checked for valid UTF-8 before lexical retrieval.
 
 Indexes up to 256 associations use exact cosine and skip a resident
 HNSW graph; larger indexes construct HNSW at open time. All maps
-use format version 3 and must be rebuilt when the serialized format changes.
+use V1 and must be rebuilt whenever its serialized format changes.
 
 ## Dictionary-compiled maps
 
