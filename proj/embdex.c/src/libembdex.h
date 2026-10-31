@@ -71,6 +71,10 @@ typedef void (*kc_embdex_progress_fn)(
     void *userdata
 );
 
+/**
+ * Configure optional synchronous progress notifications during a build.
+ * Omit this structure or set progress to NULL to disable notifications.
+ */
 typedef struct {
     kc_embdex_progress_fn progress;
     void *userdata;
