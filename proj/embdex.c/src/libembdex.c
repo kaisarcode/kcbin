@@ -1686,6 +1686,10 @@ static void kc_embdex_cover_rank(kc_embdex_evidence_t *evidence,
                 if (length == 0 || position + length > token_count ||
                     (starts & (UINT64_C(1) << position)) == 0)
                     continue;
+                if (form == 1 && length == item->literal_length &&
+                    (item->literal_starts &
+                        (UINT64_C(1) << position)) != 0)
+                    continue;
                 /* A direct literal phrase wins a tie with a substitution. */
                 for (size_t slot = 0; slot < KC_EMBDEX_COVER_PATHS;
                     slot++)
@@ -2200,10 +2204,14 @@ static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
         fprintf(file, ",\"semantic_rank\":%zu,\"variant\":%zu,"
             "\"variants_evaluated\":%zu,\"variants_requested\":%zu,"
             "\"candidate_threshold\":%.9g,\"fusion_rrf\":%.9g,"
-            "\"final_rank\":%zu,\"variant_scores\":[",
+            "\"composition_rank\":%zu,\"literal_starts\":\"%016" PRIx64
+            "\",\"mapped_starts\":\"%016" PRIx64
+            "\",\"final_rank\":%zu,\"variant_scores\":[",
             item->semantic_rank, item->semantic_variant,
             item->variants_evaluated, requested_variants,
-            item->semantic_threshold, item->fusion_rrf, item->final_rank);
+            item->semantic_threshold, item->fusion_rrf,
+            item->composition_rank, item->literal_starts,
+            item->mapped_starts, item->final_rank);
         for (size_t k = 0; k < variant_count; k++) {
             double cosine = variant_scores == NULL ? NAN :
                 variant_scores[i * variant_stride + k];
@@ -2555,7 +2563,9 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         int result;
 
         if (evidence[i].exact == 0 && evidence[i].fuzzy == 0 &&
-            evidence[i].lexical_rank == 0) continue;
+            evidence[i].mapped == 0 &&
+            evidence[i].lexical_rank == 0 &&
+            evidence[i].mapped_rank == 0) continue;
         result = kc_bm25_tokens(index->lexical,
             index->records[i].content, kc_embdex_text_append, &document);
         if (result != KC_BM25_OK || document.failed) {
@@ -2571,6 +2581,9 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                 goto finished;
             }
         }
+        if (!tokens.truncated)
+            evidence[i].literal_starts = kc_embdex_literal_starts(
+                &tokens, document.text, &evidence[i].literal_length);
         evidence[i].full_phrase = !tokens.truncated &&
             kc_embdex_contains(document.text, joined, strlen(joined));
         if (evidence[i].full_phrase) {
@@ -2592,7 +2605,36 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
             }
         }
         free(document.text);
+        if (!tokens.truncated && index->mapped_lexical != NULL &&
+            mapped_tokens.count == tokens.count &&
+            !mapped_tokens.truncated)
+        {
+            kc_embdex_text_t normalized = {0};
+            char *replacement = NULL;
+
+            status = kc_embdex_transform_text(index,
+                index->records[i].content, 0, NULL, &replacement);
+            if (status != KC_EMBDEX_OK) goto finished;
+            result = kc_bm25_tokens(index->mapped_lexical, replacement,
+                kc_embdex_text_append, &normalized);
+            free(replacement);
+            if (result != KC_BM25_OK || normalized.failed) {
+                free(normalized.text);
+                status = normalized.failed ? KC_EMBDEX_ENOMEM :
+                    KC_EMBDEX_ELEXICAL;
+                goto finished;
+            }
+            if (normalized.text != NULL) {
+                evidence[i].mapped_starts = kc_embdex_literal_starts(
+                    &mapped_tokens, normalized.text,
+                    &evidence[i].mapped_length);
+            }
+            free(normalized.text);
+        }
     }
+
+    if (!tokens.truncated)
+        kc_embdex_cover_rank(evidence, index->count, tokens.count);
 
     status = kc_embdex_variant_count(index, &tokens, &variant_plan);
     if (status != KC_EMBDEX_OK) goto finished;
@@ -2787,9 +2829,11 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         item->coverage = coverage;
         item->precision = precise;
         double score;
-        const char *reason = kc_embdex_accept(item, tokens.count,
-            exact, corrected, coverage, semantic_only_floor,
-            tokens.truncated);
+        const char *reason = item->composition_rank != 0 ?
+            "literal_composition" :
+            kc_embdex_accept(item, tokens.count,
+                exact, corrected, coverage, semantic_only_floor,
+                tokens.truncated);
 
         if (reason == NULL) {
             item->reason = mask != 0 || item->lexical_rank != 0 ||
@@ -2810,6 +2854,10 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         if (item->mapped_rank != 0)
             score += 0.05 * coverage *
                 (10.0 / (10.0 + (double)item->mapped_rank));
+        /* A complete literal covering outranks isolated semantic hits.
+         * The two best coverings preserve alternative segmentations. */
+        if (item->composition_rank == 1) score += 6.0;
+        else if (item->composition_rank == 2) score += 3.0;
         item->score = score;
         ranks[rank_count].ordinal = i;
         ranks[rank_count++].score = score;
