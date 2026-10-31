@@ -174,19 +174,30 @@ earlier words have several translations. Multiple words may change in
 the same candidate.
 
 Identical pseudo-English strings are recognized before inference and
-embedded once. Every distinct result is evaluated against the corpus;
-the highest cosine per association remains the experimental acceptance
-and ranking input. No grammatical correction or translation-ranking
-model is introduced.
+embedded once. Each distinct translation is ranked independently against
+the corpus, without additional model calls. With multiple translations,
+the semantic contribution to the final ranking combines the maximum
+cosine (weight 0.30) with mean normalized reciprocal rank (weight 0.20).
+The reciprocal weight of position `r` is `2 / (1 + r)`. A single
+translation preserves the original cosine contribution (weight 0.50).
+
+The acceptance rules still use the highest cosine and the existing
+lexical evidence; fusion only reorders accepted associations. On small
+indexes, each translation ranks every association. With HNSW, only
+returned candidates contribute to that translation's ranking.
 
 When `KC_EMBDEX_TRACE` is enabled, `variant_scores` records one cosine
-per distinct candidate text for each association. `variants_requested`
-and `variants_evaluated` expose how many candidate combinations were
-considered and how many actually required model inference. The winning
-combination is identified by `variant`. Candidates not visited by HNSW
-have null entries in their individual similarity series. These arrays
-are diagnostic; the current ranking policy still uses the maximum
-cosine, which may also increase false positives.
+per distinct candidate text for each association. `fusion_rrf` records
+the mean normalized reciprocal rank. `variants_requested` and
+`variants_evaluated` show how many candidate combinations were considered
+and how many distinct strings needed embeddings; `variant` identifies
+the combination yielding the highest cosine. HNSW candidates not
+visited by a translation have null entries.
+
+The weights were selected through an exploratory replay of the existing
+bilingual benchmark and still require validation with an independent
+execution. No grammatical correction or translation-ranking model is
+introduced.
 
 The `KC_EMBDEX_WORDMAP_VARIANTS` budget defaults to 8 when ambiguous words
 are present (1 disables alternative combinations). Indexes with no
