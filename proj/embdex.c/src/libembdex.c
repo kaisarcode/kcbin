@@ -684,8 +684,10 @@ typedef struct {
     size_t lexical_rank;
     double semantic;
     int semantic_found;
+    int semantic_measured;
     int full_phrase;
     int accepted;
+    size_t final_rank;
     double score;
     const char *reason;
 } kc_embdex_evidence_t;
@@ -1093,7 +1095,7 @@ static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
             item->exact, item->fuzzy, item->phrase,
             item->longest, item->lexical_rank);
         fputs(",\"cosine\":", file);
-        if (item->semantic_found)
+        if (item->semantic_measured)
             fprintf(file, "%.9g", item->semantic);
         else fputs("null", file);
         fprintf(file, ",\"full_phrase\":%s,\"accepted\":%s,\"score\":",
@@ -1101,7 +1103,8 @@ static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
             item->accepted ? "true" : "false");
         if (item->accepted) fprintf(file, "%.9g", item->score);
         else fputs("null", file);
-        fputs(",\"reason\":", file);
+        fprintf(file, ",\"final_rank\":%zu,\"reason\":",
+            item->final_rank);
         kc_embdex_json_string(file,
             item->reason == NULL ? "not_discovered" : item->reason);
         fputs("}\n", file);
@@ -1318,10 +1321,10 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                 for (size_t i = 0; i < index->count; i++) {
                     double cosine = kc_embdex_cosine(index, i, embedding);
 
-                    if (cosine >= semantic_floor) {
-                        evidence[i].semantic = cosine;
+                    evidence[i].semantic = cosine;
+                    evidence[i].semantic_measured = 1;
+                    if (cosine >= semantic_floor)
                         evidence[i].semantic_found = 1;
-                    }
                 }
             } else {
                 int result = kc_hnsw_search(index->graph,
@@ -1343,6 +1346,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                         goto finished;
                     }
                     evidence[(size_t)ordinal].semantic = semantic[i].score;
+                    evidence[(size_t)ordinal].semantic_measured = 1;
                     evidence[(size_t)ordinal].semantic_found = 1;
                 }
             }
@@ -1407,6 +1411,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     }
 
     qsort(ranks, rank_count, sizeof(*ranks), kc_embdex_rank_compare);
+    for (size_t i = 0; i < rank_count; i++)
+        evidence[ranks[i].ordinal].final_rank = i + 1;
     if (rank_count > limit) rank_count = limit;
     for (size_t i = 0; i < rank_count; i++) {
         size_t ordinal = ranks[i].ordinal;
