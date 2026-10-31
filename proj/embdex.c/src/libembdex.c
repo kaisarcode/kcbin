@@ -35,6 +35,7 @@
 #define KC_EMBDEX_EXACT_LIMIT 256U
 #define KC_EMBDEX_QUERY_TOKENS 64U
 #define KC_EMBDEX_FUZZY_CHOICES 8U
+#define KC_EMBDEX_COVER_PATHS 2U
 
 static const unsigned char kc_embdex_magic[8] = {
     'K', 'C', 'E', 'M', 'B', 'D', 'X', '\n'
@@ -1544,6 +1545,11 @@ typedef struct {
     uint64_t fuzzy;
     uint64_t mapped;
     uint64_t phrase;
+    uint64_t literal_starts;
+    uint64_t mapped_starts;
+    size_t literal_length;
+    size_t mapped_length;
+    size_t composition_rank;
     size_t longest;
     size_t lexical_rank;
     size_t mapped_rank;
@@ -1595,6 +1601,139 @@ typedef struct {
     const char *document;
     kc_embdex_evidence_t *evidence;
 } kc_embdex_phrase_context_t;
+
+/* One edge of a complete literal covering of the query. */
+typedef struct {
+    double score;
+    size_t ordinal;
+    size_t next_position;
+    size_t next_slot;
+    int valid;
+} kc_embdex_cover_t;
+
+/**
+ * Match an entire normalized association against each contiguous query span.
+ * The positional bitset avoids treating a bag-of-words hit as a phrase.
+ * @param tokens Normalized query terms.
+ * @param document Space-separated normalized association terms.
+ * @param word_count Receives the association length.
+ * @return Bitset of matching starting positions.
+ */
+static uint64_t kc_embdex_literal_starts(const kc_embdex_tokens_t *tokens,
+    const char *document, size_t *word_count)
+{
+    const char *p = document;
+    uint64_t starts = 0;
+    size_t words = 0;
+
+    while (*p != '\0') {
+        while (*p != '\0' && *p != ' ') p++;
+        words++;
+        if (*p == ' ') p++;
+    }
+    *word_count = words;
+    if (words == 0 || words > tokens->count) return 0;
+    for (size_t start = 0; start + words <= tokens->count; start++) {
+        const char *cursor = document;
+        int equal = 1;
+
+        for (size_t j = 0; j < words; j++) {
+            size_t length = strlen(tokens->value[start + j]);
+
+            if (strncmp(cursor, tokens->value[start + j], length) != 0 ||
+                (cursor[length] != ' ' && cursor[length] != '\0'))
+            {
+                equal = 0;
+                break;
+            }
+            cursor += length;
+            if (*cursor == ' ') cursor++;
+        }
+        if (equal) starts |= UINT64_C(1) << start;
+    }
+    return starts;
+}
+
+/**
+ * Find the two best complete literal segmentations of a bounded query.
+ * Each association is an edge spanning its entire contiguous phrase.
+ * The DP favors longer spans and fewer fragments, then lets semantic
+ * evidence order associations inside each selected covering.
+ * @param evidence Per-association evidence and matching span bitsets.
+ * @param count Association count.
+ * @param token_count Query length, at most KC_EMBDEX_QUERY_TOKENS.
+ * @return None. Winning association groups receive a rank of one or two.
+ */
+static void kc_embdex_cover_rank(kc_embdex_evidence_t *evidence,
+    size_t count, size_t token_count)
+{
+    kc_embdex_cover_t best[KC_EMBDEX_QUERY_TOKENS + 1]
+        [KC_EMBDEX_COVER_PATHS] = {{{0}}};
+
+    if (token_count < 2 || token_count > KC_EMBDEX_QUERY_TOKENS)
+        return;
+    best[token_count][0].valid = 1;
+    for (size_t position = token_count; position-- > 0;) {
+        for (size_t i = 0; i < count; i++) {
+            const kc_embdex_evidence_t *item = &evidence[i];
+
+            for (size_t form = 0; form < 2; form++) {
+                size_t length = form == 0 ?
+                    item->literal_length : item->mapped_length;
+                uint64_t starts = form == 0 ?
+                    item->literal_starts : item->mapped_starts;
+
+                if (length == 0 || position + length > token_count ||
+                    (starts & (UINT64_C(1) << position)) == 0)
+                    continue;
+                /* A direct literal phrase wins a tie with a substitution. */
+                for (size_t slot = 0; slot < KC_EMBDEX_COVER_PATHS;
+                    slot++)
+                {
+                    kc_embdex_cover_t suffix =
+                        best[position + length][slot];
+                    kc_embdex_cover_t candidate;
+
+                    if (!suffix.valid) continue;
+                    candidate.score = suffix.score + (double)length +
+                        0.20 * (double)(length - 1) - 0.25 -
+                        (form == 1 ? 0.05 : 0.0);
+                    candidate.ordinal = i;
+                    candidate.next_position = position + length;
+                    candidate.next_slot = slot;
+                    candidate.valid = 1;
+                    for (size_t k = 0; k < KC_EMBDEX_COVER_PATHS; k++) {
+                        if (!best[position][k].valid ||
+                            candidate.score > best[position][k].score)
+                        {
+                            for (size_t shift = KC_EMBDEX_COVER_PATHS - 1;
+                                shift > k; shift--)
+                                best[position][shift] =
+                                    best[position][shift - 1];
+                            best[position][k] = candidate;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (size_t route = 0; route < KC_EMBDEX_COVER_PATHS; route++) {
+        size_t position = 0, slot = route;
+
+        if (!best[0][route].valid) continue;
+        while (position < token_count) {
+            kc_embdex_cover_t edge = best[position][slot];
+            kc_embdex_evidence_t *item = &evidence[edge.ordinal];
+
+            if (item->composition_rank == 0 ||
+                item->composition_rank > route + 1)
+                item->composition_rank = route + 1;
+            position = edge.next_position;
+            slot = edge.next_slot;
+        }
+    }
+}
 
 /**
  * Keep the first bounded set of normalized query words in owned storage.
