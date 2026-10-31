@@ -1020,6 +1020,51 @@ static double kc_embdex_cosine(const kc_embdex_t *index,
 }
 
 /**
+ * Compare scalar similarity values for a small sorted reference sample.
+ * @param left First double.
+ * @param right Second double.
+ * @return Comparison order.
+ */
+static int kc_embdex_double_compare(const void *left, const void *right)
+{
+    const double a = *(const double *)left;
+    const double b = *(const double *)right;
+
+    return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * Require an uncorroborated vector neighbor to be unusual relative to the
+ * query's similarity to representative indexed associations. A bounded
+ * stratified sample avoids exhaustive work on large HNSW indexes.
+ * @param index Opened index.
+ * @param query Calculated query embedding.
+ * @return Minimum independent semantic acceptance similarity.
+ */
+static double kc_embdex_semantic_threshold(const kc_embdex_t *index,
+    const float *query)
+{
+    double similarities[64];
+    double threshold = 0.58;
+    size_t sample_count = index->count < 64 ? index->count : 64;
+
+    if (sample_count < 5) return threshold;
+    for (size_t i = 0; i < sample_count; i++) {
+        size_t ordinal = i * index->count / sample_count;
+
+        similarities[i] = kc_embdex_cosine(index, ordinal, query);
+    }
+    qsort(similarities, sample_count, sizeof(*similarities),
+        kc_embdex_double_compare);
+    {
+        double reference = similarities[(sample_count * 3) / 4] + 0.07;
+
+        if (reference > threshold) threshold = reference;
+    }
+    return threshold;
+}
+
+/**
  * Sort accepted associations by descending evidence score and stable ordinal.
  * @param left First candidate.
  * @param right Second candidate.
@@ -1072,7 +1117,8 @@ static void kc_embdex_json_string(FILE *file, const char *value)
  * @return None; diagnostic I/O never changes the search outcome.
  */
 static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
-    const kc_embdex_evidence_t *evidence, size_t count)
+    const kc_embdex_evidence_t *evidence, size_t count,
+    double semantic_threshold)
 {
     const char *path = getenv("KC_EMBDEX_TRACE");
     FILE *file;
@@ -1086,7 +1132,8 @@ static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
 
         fputs("{\"query\":", file);
         kc_embdex_json_string(file, query);
-        fprintf(file, ",\"ordinal\":%zu,\"id\":", i);
+        fprintf(file, ",\"ordinal\":%zu,\"semantic_threshold\":%.9g,\"id\":",
+            i, semantic_threshold);
         kc_embdex_json_string(file, index->records[i].id);
         fprintf(file, ",\"content\":");
         kc_embdex_json_string(file, index->records[i].content);
@@ -1132,7 +1179,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     kc_embdex_result_fn callback, void *userdata)
 {
     const double semantic_floor = 0.50;
-    const double semantic_only_floor = 0.58;
+    double semantic_only_floor = 0.58;
     kc_embdex_tokens_t tokens = {0};
     kc_embdex_evidence_t *evidence = NULL;
     kc_embdex_rank_t *ranks = NULL;
@@ -1321,6 +1368,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                 status = KC_EMBDEX_EEMBED;
                 goto finished;
             }
+            semantic_only_floor = kc_embdex_semantic_threshold(index,
+                embedding);
             if (index->graph == NULL) {
                 for (size_t i = 0; i < index->count; i++) {
                     double cosine = kc_embdex_cosine(index, i, embedding);
@@ -1433,7 +1482,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
 
 finished:
     if (status == KC_EMBDEX_OK && evidence != NULL && tokens.count > 0)
-        kc_embdex_trace(index, query, evidence, index->count);
+        kc_embdex_trace(index, query, evidence, index->count,
+            semantic_only_floor);
     kc_bm25_free(lexical);
     kc_hnsw_free(semantic);
     kc_emb_free(embedding);
