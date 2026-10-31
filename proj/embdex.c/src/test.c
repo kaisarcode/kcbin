@@ -25,7 +25,7 @@
 #ifdef __EMSCRIPTEN__
 static int embdex_test_total = 7;
 #else
-static int embdex_test_total = 8;
+static int embdex_test_total = 9;
 #endif
 static int embdex_test_current = 0;
 
@@ -463,6 +463,67 @@ static int embdex_test_mode_contract(void)
 
 #ifndef __EMSCRIPTEN__
 /**
+ * Verify the CLI help and version output using a text stream.
+ * @return Zero when the public CLI information follows the kclib contract.
+ */
+static int embdex_test_cli_info(void)
+{
+    const char *path = "embdex-cli-info.txt";
+    FILE *file;
+    char line[512];
+    int failed = 0;
+    int usage = 0, commands = 0, options = 0;
+    int build = 0, search = 0, help = 0, version = 0;
+
+    failed |= system(
+        KC_TEST_CLI " --help > embdex-cli-info.txt 2>&1"
+    ) != 0;
+    file = fopen(path, "r");
+    if (file == NULL) {
+        failed = 1;
+    } else {
+        while (fgets(line, sizeof(line), file) != NULL) {
+            usage |= strstr(line, "Usage: ") != NULL &&
+                strstr(line, " <command> <index> [options]") != NULL;
+            commands |= strcmp(line, "Commands:\n") == 0;
+            options |= strcmp(line, "Options:\n") == 0;
+            build |= strstr(line, "  build <index>") == line;
+            search |= strstr(line, "  search <index> <query>") == line;
+            help |= strstr(line, "-h, --help") != NULL;
+            version |= strstr(line, "-v, --version") != NULL;
+        }
+        failed |= ferror(file) != 0;
+        failed |= fclose(file) != 0;
+    }
+    failed |= !(usage && commands && options && build && search &&
+        help && version);
+
+    failed |= system(
+        KC_TEST_CLI " --version > embdex-cli-info.txt 2>&1"
+    ) != 0;
+    file = fopen(path, "r");
+    if (file == NULL) {
+        failed = 1;
+    } else {
+        unsigned long long build_version = 0;
+        char extra;
+
+        failed |= fscanf(file, "%llu %c", &build_version, &extra) != 1;
+        failed |= fclose(file) != 0;
+        failed |= build_version != (unsigned long long)kc_embdex_version();
+    }
+    failed |= system(
+        KC_TEST_CLI " --help build > " KC_TEST_NULL " 2>&1"
+    ) == 0;
+    failed |= system(
+        KC_TEST_CLI " --version search > " KC_TEST_NULL " 2>&1"
+    ) == 0;
+    remove(path);
+    return embdex_test_result("cli_info",
+        "prints kclib command help and the library build version", failed);
+}
+
+/**
  * Check that the CLI builds and searches tab-separated associations.
  * @return Zero when the CLI contract works, one otherwise.
  */
@@ -605,6 +666,9 @@ static int embdex_run_case(const char *name)
         return embdex_test_errors();
     }
 #ifndef __EMSCRIPTEN__
+    if (strcmp(name, "cli_info") == 0) {
+        return embdex_test_cli_info();
+    }
     if (strcmp(name, "embdex_cli") == 0) {
         return embdex_test_cli();
     }
@@ -630,6 +694,7 @@ int main(int argc, char **argv)
         "binary_roundtrip",
         "invalid_inputs",
 #ifndef __EMSCRIPTEN__
+        "cli_info",
         "embdex_cli",
 #endif
     };
