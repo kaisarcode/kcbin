@@ -27,7 +27,7 @@
 #endif
 
 #define KC_EMBDEX_HEADER_SIZE 104U
-#define KC_EMBDEX_FORMAT_VERSION 3U
+#define KC_EMBDEX_FORMAT_VERSION 1U
 #define KC_EMBDEX_MODEL_SIZE 32U
 #define KC_EMBDEX_EXACT_LIMIT 256U
 #define KC_EMBDEX_QUERY_TOKENS 64U
@@ -444,7 +444,8 @@ static int kc_embdex_wordmap_load(kc_embdex_t *index,
     size_t capacity = 0;
     int status;
 
-    if (count > 0 && paths == NULL) return KC_EMBDEX_EINVAL;
+    if (count == 0) return KC_EMBDEX_OK;
+    if (paths == NULL) return KC_EMBDEX_EINVAL;
     for (size_t i = 0; i < count; i++) {
         if (paths[i] == NULL || paths[i][0] == '\0')
             return KC_EMBDEX_EINVAL;
