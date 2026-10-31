@@ -218,9 +218,13 @@ static int kc_embdex_model_identity(char tag[KC_EMBDEX_MODEL_SIZE])
         if (fclose(file) != 0 || failed) return KC_EMBDEX_EIO;
     }
     memset(tag, 0, KC_EMBDEX_MODEL_SIZE);
-    if (snprintf(tag, KC_EMBDEX_MODEL_SIZE, "%s+%08" PRIx32,
-        kc_embdex_model, digest) >= KC_EMBDEX_MODEL_SIZE)
-        return KC_EMBDEX_EFORMAT;
+    {
+        int written = snprintf(tag, KC_EMBDEX_MODEL_SIZE,
+            "%s+%08" PRIx32, kc_embdex_model, digest);
+
+        if (written < 0 || (size_t)written >= KC_EMBDEX_MODEL_SIZE)
+            return KC_EMBDEX_EFORMAT;
+    }
     return KC_EMBDEX_OK;
 }
 
