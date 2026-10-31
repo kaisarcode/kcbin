@@ -1061,6 +1061,8 @@ static int kc_embdex_load_wordmap(kc_embdex_t *index)
         replacement_length = kc_embdex_read_u32(data + offset + 4);
         offset += 8;
         if (source_length == 0 || replacement_length == 0 ||
+            source_length == SIZE_MAX ||
+            replacement_length == SIZE_MAX ||
             !kc_embdex_fits(end, offset, source_length + 1) ||
             data[offset + source_length] != '\0' ||
             memchr(data + offset, '\0', source_length) != NULL)
@@ -1280,18 +1282,23 @@ static int kc_embdex_save(const kc_embdex_t *index, const char *path)
             size_t source_length = strlen(index->wordmap[i].source);
             size_t replacement_length =
                 strlen(index->wordmap[i].replacement);
+            size_t combined;
 
             if (source_length == 0 || replacement_length == 0 ||
                 source_length > UINT32_MAX ||
                 replacement_length > UINT32_MAX ||
-                source_length > SIZE_MAX - replacement_length - 10 ||
-                words_size > SIZE_MAX -
-                    (source_length + replacement_length + 10))
+                source_length > SIZE_MAX - replacement_length)
             {
                 status = KC_EMBDEX_EFORMAT;
                 goto finished;
             }
-            words_size += source_length + replacement_length + 10;
+            combined = source_length + replacement_length;
+            if (combined > SIZE_MAX - 10 ||
+                words_size > SIZE_MAX - combined - 10) {
+                status = KC_EMBDEX_EFORMAT;
+                goto finished;
+            }
+            words_size += combined + 10;
         }
     }
     if (record_size > SIZE_MAX - lexical_size ||
