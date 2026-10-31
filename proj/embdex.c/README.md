@@ -1,13 +1,16 @@
-# embdex - Semantic text indexing
+# embdex.c - Text association retrieval
 
-embdex builds portable indexes from text associations and searches them using
-semantic embeddings, BM25 lexical ranking, or both. Each entry has an ID and
-text content. IDs may repeat, and each association remains independently
-searchable. Indexes work locally without a database or server.
+embdex builds portable indexes of text associations and retrieves relevant
+matches from natural-language queries. Each association has an ID and content;
+IDs may repeat, and each entry remains independently searchable.
+
+The search strategy is automatic. The consumer does not select algorithms or
+manage intermediate embeddings, search results, or index serialization.
+Everything runs locally without a database or server.
 
 ## Quick start
 
-Build an index from tab-separated ID and content lines:
+Create an index from tab-separated ID/content pairs:
 
 ```sh
 printf 'smile\tLaughter, joy, humor and something funny\n' |
@@ -17,50 +20,54 @@ printf 'smile\tLaughter, joy, humor and something funny\n' |
 Search the saved index:
 
 ```sh
-embdex search icons.bin "that made me laugh"
-embdex search icons.bin "smile" --mode hybrid
+embdex search icons.bin "something funny"
+embdex search icons.bin "smile" --limit 5
 ```
 
-Results are tab-separated lines containing ID, score, and original content.
-The default semantic mode reports cosine similarity. Lexical mode reports BM25
-scores; hybrid mode reports reciprocal-rank-fusion scores; rerank mode reports
-cosine similarity for BM25-selected candidates.
+Output is tab-separated: ID, ranking score, and original content.
 
 ## Native library
 
-An application can pass an in-memory array of associations directly:
+The library accepts the associations directly. Building persists the index;
+opening it allows repeated searches.
 
 ```c
 #include "libembdex.h"
+
+static int visit(const kc_embdex_result_t *result, void *userdata)
+{
+    (void)userdata;
+    printf("%s: %s\n", result->id, result->content);
+    return 0;
+}
 
 kc_embdex_document_t corpus[] = {
     {"document", "Authentication between peers"},
     {"document", "Exchanging public keys"}
 };
-kc_embdex_t *index = NULL;
-kc_embdex_result_t *results = NULL;
-size_t count = 0;
 
-if (kc_embdex_build(&index, corpus, 2) == KC_EMBDEX_OK) {
-    kc_embdex_save(index, "corpus.bin");
-    if (kc_embdex_search(index, "secure connections", NULL,
-        &results, &count) == KC_EMBDEX_OK) {
-        kc_embdex_free(results);
-    }
+kc_embdex_build("corpus.bin", corpus, 2);
+
+kc_embdex_t *index = NULL;
+if (kc_embdex_open(&index, "corpus.bin") == KC_EMBDEX_OK) {
+    kc_embdex_search(index, "secure connections", NULL, visit, NULL);
     kc_embdex_close(index);
 }
 ```
 
-The library exposes build, save, open, search, search_mode, and close. The
-index owns its associations, so the source array may be released after
-building. Applications choose their own document boundaries and preprocessing.
-The existing search API remains semantic; search_mode selects the other
-ranking strategies.
+The callback receives borrowed results in score order. Returning nonzero
+stops delivery; no result-release operation is needed. An optional limit
+controls the maximum number delivered.
+
+The current automatic ranking combines BM25 and embedding candidates with
+reciprocal-rank fusion. Further spelling and phrase retrieval, evidence-based
+selection, and adaptive execution remain planned; the ranking should not be
+considered calibrated for all datasets.
 
 ## Build
 
-Set `KCDIST_DIR` to a precompiled kclib distribution containing matching
-`libemb`, `libhnsw`, `libbm25`, and `libmmap` artifacts and headers for the target:
+Use a precompiled kclib distribution containing target-matched libemb,
+libhnsw, libbm25 and libmmap artifacts:
 
 ```sh
 export KCDIST_DIR="$HOME/kclib/dist"
@@ -71,45 +78,27 @@ make test wine
 make test wasm
 ```
 
-The default `make` builds the native target. `make all` builds the supported
-cross-compilation targets, including `wasm/wasm32` with Emscripten.
-`make test wine` runs Windows contract tests through Wine after the Windows
-target has been built; `make test wasm` runs the library contract tests with
-Emscripten and Node.js. The project keeps test binaries in `.build/`,
-outside the distributable `bin/` tree.
-
-From the kcbin repository root, use the standard build, test, and distribution
-scripts to generate artifact checksums and publish the project:
+From the kcbin root:
 
 ```sh
-export KCDIST_DIR="$HOME/kclib/dist"
 ./scripts/build.sh embdex
 ./scripts/test.sh embdex
 ./scripts/dist.sh embdex
 ```
 
-The distribution script publishes only embdex artifacts and metadata to the
-shared distribution root. It never compiles or copies the dependent kclibs.
-All targets link against the target-matched precompiled `libemb.a`,
-`libhnsw.a`, `libbm25.a`, and `libmmap.a` from `KCDIST_DIR`; no separate kclib shared
-libraries are required at runtime. Every target also produces `libembdex.a`
-alongside its existing shared library or WASM module. This static archive
-contains embdex's C code; applications linking it must also link the three
-precompiled kclib archives, using a C++ linker for the GGML code in `libemb`.
-The WASM build produces `libembdex.wasm` and `libembdex.a`.
-Native CLI executables are linked with `libembdex.a` and the four kclib
-static archives, so they do not need `libembdex.so` or kclib shared libraries
-at runtime. The shared library is still published for other consumers.
+The project links precompiled static kclibs for its supported targets; it
+does not build or vendor them. See the root build documentation for the
+cross-compilation and distribution contracts.
 
 ## Documentation
 
-- [API and CLI](doc/api.md) - usage, associations, options, and lifecycle.
-- [Binary index](doc/index-format.md) - portability and persistence contract.
+- [API and CLI](doc/api.md)
+- [Binary index](doc/index-format.md)
 
 ## Notice
 
-No guarantees are provided regarding stability or future support. You may test,
-use, and modify it.
+No guarantees are provided regarding stability or future support. You may
+test, use, and modify it.
 
 Questions can be sent to [kaisar@kaisarcode.com](mailto:kaisar@kaisarcode.com).
 Pull requests are not accepted; the project avoids depending on GitHub as
