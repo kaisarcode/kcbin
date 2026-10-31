@@ -1,34 +1,13 @@
-# API and CLI
+# C API
 
-embdex indexes independent ID/text associations and searches them with one
-automatic retrieval strategy. The caller provides content and a query;
-normalization, ranking, candidate handling, and resource management belong
-to the library.
+The library builds self-contained maps from ID/text associations and searches
+them without a server. Applications own the input data and decide what to do
+with the ranked results. All public declarations are in
+[`libembdex.h`](../src/libembdex.h).
 
-## Associations
+## Build and search
 
-Each entry has an ID and UTF-8 content string. IDs are not unique keys:
-repeated IDs represent separate associations. The source application
-determines how to split documents and what IDs mean.
-
-## C API
-
-```c
-#include "libembdex.h"
-
-kc_embdex_document_t documents[] = {
-    {"icon-laugh", "Humor, laughter and something amusing"},
-    {"icon-laugh", "Joy and a cheerful smile"},
-    {"icon-alert", "Warning, danger and caution"}
-};
-
-int status = kc_embdex_build("icons.bin", documents, 3);
-```
-
-Building writes the index directly to the specified path. Input strings
-are borrowed only for the call. There is no separate save operation.
-
-To query the saved index:
+A map is created once and may be opened for repeated queries:
 
 ```c
 #include "libembdex.h"
@@ -42,237 +21,134 @@ static int show(const kc_embdex_result_t *result, void *userdata)
     return 0;
 }
 
-int search_icons(void)
+int main(void)
 {
+    const kc_embdex_document_t documents[] = {
+        {"find", "find files by name"},
+        {"grep", "search text inside files"}
+    };
     kc_embdex_t *index = NULL;
-    size_t limit = 5;
-    kc_embdex_search_options_t options = { .limit = &limit };
-    int status = kc_embdex_open(&index, "icons.bin");
+    int status = kc_embdex_build("commands.bin", documents, 2);
 
-    if (status == KC_EMBDEX_OK) {
-        status = kc_embdex_search(index, "something funny",
-            &options, show, NULL);
-    }
+    if (status == KC_EMBDEX_OK)
+        status = kc_embdex_open(&index, "commands.bin");
+    if (status == KC_EMBDEX_OK)
+        status = kc_embdex_search(index, "find files by name",
+            NULL, show, NULL);
+
     kc_embdex_close(index);
-    return status;
+    return status == KC_EMBDEX_OK ? 0 : 1;
 }
 ```
 
-A callback receives one borrowed result at a time, already ordered by
-ranking score. Its result pointer and strings remain valid only during
-the invocation; copy them if they must outlive it. Return zero to keep
-receiving matches, or nonzero to stop delivery successfully.
+`kc_embdex_build()` borrows the input strings for the duration of the
+call, writes the complete map to the specified path, and releases its
+temporary build resources. IDs are not unique keys: each association
+remains independent even when several entries share an ID.
 
-An omitted limit defaults to ten. A limit of zero delivers no matches.
-Results are not caller-owned and require no free operation. The opened
-index remains usable for additional searches until closed.
+`kc_embdex_open()` returns an index handle that can be searched multiple
+times until `kc_embdex_close()` is called. Close also accepts NULL.
 
-The public operations are kc_embdex_build,
-kc_embdex_build_with_dictionaries, kc_embdex_open, kc_embdex_search,
-kc_embdex_close, kc_embdex_strerror, and kc_embdex_version.
-There are no public search modes.
+## Build with dictionaries
 
-## Retrieval
-
-Search automatically combines independent candidate discovery:
-
-- BM25 ranks matching terms from the full query.
-- The saved BM25 vocabulary supplies normalized exact term matches and
-    postings, with no separate dictionary or Unicode analyzer.
-- Unmatched terms may be compared with indexed words by bounded Unicode
-    Levenshtein distance. Short terms and ambiguous single-word corrections
-    are rejected.
-- libngram finds complete normalized phrases and overlapping word windows.
-- libemb obtains one embedding for queries requiring semantic retrieval.
-    Cosine similarity scans small indexes directly; HNSW handles larger ones.
-
-All evidence is accumulated under the internal document ordinal.
-When whole associations match contiguous spans of a query, a bounded
-literal-covering pass finds the two highest-scoring segmentations.
-Longer phrases and fewer fragments are preferred, while component words
-remain independently eligible for retrieval. For example, a map with
-`quiero`, `tomar`, `agua`, and `tomar agua` favors the association
-`tomar agua` in the full covering `quiero + tomar agua` over separate
-word hits `quiero + tomar + agua`. Dictionary-normalized spans also
-participate, with original-text literals breaking ties.
-
-The coverings contribute ranking evidence to the associations. The public
-search API still returns a flat, ranked set of independent associations,
-not an orchestration graph or an array of grouped paths.
-
-The engine otherwise first decides whether the evidence is sufficient,
-then ranks accepted associations. BM25 supplies discovery order; a BM25
-hit alone cannot turn an unrelated association into an accepted result.
-
-Lexical coverage is weighted by the rarity of the original normalized
-query words. Terms absent from the index are assigned singleton rarity
-rather than an artificial maximum. Approximate matches do not alter
-the document frequency of the original term, and repeated evidence
-for one query position is counted once.
-
-A complete phrase, strong multi-term lexical coverage or independently
-strong semantic similarity can justify acceptance. Additionally, an
-unambiguous spelling correction supported by exact terms can qualify
-without relying on semantic inference, and a candidate close to the
-top semantic rank can qualify when corroborated by lexical evidence.
-A semantic candidate ranked far below the top cannot bypass the
-query-relative threshold merely by having a BM25 hit.
-
-For smaller indexes the semantic rank is computed from all indexed
-cosine similarities; for larger indexes it comes from HNSW's candidate
-ordering. The relative similarity threshold comes from a bounded sample
-of the corpus, and no search mode is exposed.
-
-Semantic inference is a fallback after literal retrieval. When the query
-is fully covered by a literal phrase or a complete contiguous segmentation
-of indexed associations, search ranks the lexical candidates without
-calling `libemb`. This applies regardless of the requested result limit.
-Literal matches from the compiled dictionary-normalized index also count
-toward complete coverage. Incomplete coverage, including a query with
-unmatched words, triggers semantic inference and ranking.
-
-The fallback rule measures coverage rather than trying to understand
-the query. A full set of literal associations may still be ambiguous;
-`embdex` returns ranked candidates for the caller to interpret. Truncated
-lexical queries conservatively continue to semantic inference. The
-diagnostic trace reports `variants_evaluated: 0` when embeddings were
-skipped and a positive count when inference ran.
-
-The current acceptance boundaries and score weights are provisional
-implementation policy. They require validation against positive and
-negative queries; the diagnostic trace is available for that purpose.
-
-### Diagnostic trace
-
-Set `KC_EMBDEX_TRACE` to a writable JSON Lines file to append the
-evidence of every association considered by each search:
-
-```sh
-KC_EMBDEX_TRACE=/tmp/embdex-trace.jsonl \
-    embdex search corpus.bin "peer authentication" --limit 5
-```
-
-The opt-in trace includes corpus ordinals, IDs, original content,
-bitmasks of lexical and phrase matches, BM25 and semantic ranks, measured cosine
-similarities, weighted coverage, acceptance reasons, scores and ranks
-before result-limit truncation. It is intended for benchmarks, not
-production logging: it includes source text and queries, and is appended
-to the specified file. Failure to write diagnostics does not affect
-search results. It does not add a public API operation.
-
-The index stores normalized terms and postings inside BM25's persistent
-section. Search builds temporary word coverage and phrase evidence only
-for the duration of each call. A query's lexical analysis is limited to
-its first 64 tokens to bound worst-case work; semantic inference, when
-used, still receives the complete original query. The entire input is
-checked for valid UTF-8 before lexical retrieval.
-
-Indexes up to 256 associations use exact cosine and skip a resident
-HNSW graph; larger indexes construct HNSW at open time. All maps
-use V1 and must be rebuilt whenever its serialized format changes.
-
-## Dictionary-compiled maps
-
-A compiled map can be built from one dataset and zero or more independent
-word-substitution dictionaries. Each dictionary is a UTF-8 TSV file with
-one source word and one replacement word per line:
-
-```text
-claves	passwords
-claves	keys
-```
-
-The input order matters: the first replacement for each source word is
-used for document embeddings and the additional normalized BM25 index.
-Further replacements become alternatives when processing queries.
-Dictionary files can overlap; duplicate pairs are ignored, while
-different replacements for the same source word remain available.
-No language identifier, locale, grammar or word meanings are required.
-
-```sh
-embdex build mapa.bin -i asociaciones.tsv \
-    -d spanish.tsv -d rioplatense.tsv
-embdex search mapa.bin "guardar mis claves"
-```
-
-The output binary embeds its merged word dictionary, original associations,
-their normalized vectors, and both original and substituted lexical indexes.
-Opening and searching the map requires only the binary, even when the
-original TSV files have been deleted. Independent maps can use entirely
-different datasets and dictionary combinations.
-
-The C API also accepts explicit dictionary inputs:
+`kc_embdex_build_with_dictionaries()` adds an ordered list of dictionary
+files and optional progress notifications:
 
 ```c
-const char *dictionaries[] = {"spanish.tsv", "rioplatense.tsv"};
+const char *dictionaries[] = {"spanish.tsv", "regional.tsv"};
 int status = kc_embdex_build_with_dictionaries(
-    "mapa.bin", documents, document_count, dictionaries, 2, NULL);
+    "commands.bin", documents, count, dictionaries, 2, NULL);
 ```
 
-The `kc_embdex_build()` operation builds maps without dictionary
-substitutions. Dictionaries are supplied only at build time; search
-needs only the compiled map.
+Dictionary files must exist while building. They are merged into the
+binary, so opening and searching requires only the resulting map.
+Pass NULL and zero for the dictionary array and count to build without
+substitutions.
 
-The final argument to `kc_embdex_build_with_dictionaries()` is an optional
-`kc_embdex_build_options_t`. Its progress callback reports preparation,
-embedding, saving and completion in that order. During embedding,
-`completed` advances from zero to the total number of associations.
-Other stages supply zero counters. Callbacks run synchronously and cannot
-cancel a build; a NULL option disables notifications.
+## Build progress
 
-This is literal substitution rather than sentence translation. Unmatched
-words are preserved. Queries can test up to eight deterministic combinations
-when words have alternative replacements. If the complete combination set
-fits the budget it is enumerated; otherwise candidate combinations are
-distributed across the ambiguous positions. Duplicate resulting strings
-are embedded only once.
+A callback can observe the build without controlling its implementation:
 
-With multiple query variants, semantic ranking combines the highest cosine
-with reciprocal-ranking agreement across variants. Both BM25 structures
-also contribute lexical evidence. A map is an approximate candidate
-narrower for downstream classification; it does not assign final meaning
-to a word or guarantee that an arbitrary query has a correct result.
+```c
+static void progress(kc_embdex_build_stage_t stage,
+    size_t completed, size_t total, void *userdata)
+{
+    (void)userdata;
 
-The variant budget is fixed at eight. `KC_EMBDEX_TRACE`
-records candidate evidence, including
-`mapped`, `mapped_bm25_rank`, `composition_rank`,
-`literal_starts`, `mapped_starts`, `fusion_rrf`, and `variant_scores`.
-`KC_EMBDEX_WORDMAP_TRACE` records the actual substituted query strings.
-These traces are optional and contain the input text.
+    if (stage == KC_EMBDEX_BUILD_EMBED && total != 0)
+        printf("%.1f%%\n", 100.0 * (double)completed / (double)total);
+}
 
-## CLI
+int build_with_progress(const kc_embdex_document_t *documents, size_t count)
+{
+    kc_embdex_build_options_t options = {
+        .progress = progress,
+        .userdata = NULL
+    };
 
-Build reads tab-separated ID/content associations from standard input
-or a file. Optional `-d` / `--dictionary` flags are repeatable and
-provide independent dictionary files in priority order:
-
-```sh
-embdex build corpus.bin -i documents.tsv --progress
-printf 'doc-1\tAuthentication between peers\n' | embdex build corpus.bin
+    return kc_embdex_build_with_dictionaries(
+        "commands.bin", documents, count, NULL, 0, &options);
+}
 ```
 
-`-p` / `--progress` is optional for `build`. It reports preparation,
-embedding progress every 1% on a single refreshed terminal line,
-saving and completion to standard error. The normal build prints no
-progress, and search accepts neither flag.
+The callback receives these phases in order:
 
-The first tab separates ID from content. Blank lines are ignored;
-nonblank lines must contain nonempty ID and content. Embedded tabs,
-line breaks and binary NUL bytes are not supported by the text CLI.
-The C API does not require TSV.
+| Phase | Meaning |
+| :--- | :--- |
+| `KC_EMBDEX_BUILD_PREPARE` | Initialize the index and prepare lexical data |
+| `KC_EMBDEX_BUILD_EMBED` | Generate embeddings; `completed` advances from 0 to `total` |
+| `KC_EMBDEX_BUILD_SAVE` | Serialize and write the binary map |
+| `KC_EMBDEX_BUILD_DONE` | Map saved successfully |
 
-Search a saved index:
+Outside the embedding phase, `completed` and `total` are zero.
+Notifications run synchronously in the calling thread. The callback
+does not return a cancellation status; `DONE` is not emitted if the build
+fails. Pass NULL for the options argument to disable notifications.
 
-```sh
-embdex search corpus.bin "peer authentication"
-embdex search corpus.bin "security" --limit 5
-```
+The API reports every completed association during embedding.
+The CLI independently chooses how frequently to display that progress.
 
-Each output row contains ID, score and content separated by tabs.
-Diagnostic messages go to standard error, with a nonzero exit status
-for invalid arguments or failed operations. -h/--help and
--v/--version follow the standard kclib CLI conventions.
+## Search results
+
+`kc_embdex_search()` delivers one borrowed `kc_embdex_result_t` at a
+time, ordered by score. A result contains the original association ID,
+content, and ranking score. It does not transfer ownership to the
+caller. Copy strings that must outlive their callback.
+
+`kc_embdex_search_options_t` accepts an optional pointer to `limit`.
+Omitting the options sets a default of 10 results. A limit of zero
+delivers none. Returning a nonzero value from a result callback stops
+delivery successfully; it does not turn the search into an error.
+
+The search strategy is automatic. The library returns independent ranked
+candidates, not a final classification or a sequence of operations.
+
+## Errors and persistence
+
+The public functions return `KC_EMBDEX_OK` on success or a negative
+status on failure. `kc_embdex_strerror()` provides a static description
+of a status.
+
+| Status | Meaning |
+| :--- | :--- |
+| `KC_EMBDEX_EINVAL` | Invalid argument |
+| `KC_EMBDEX_ENOMEM` | Allocation failure |
+| `KC_EMBDEX_EIO` | File I/O failure |
+| `KC_EMBDEX_EFORMAT` | Invalid or incompatible binary map |
+| `KC_EMBDEX_EEMBED` | Embedding failure |
+| `KC_EMBDEX_EINDEX` | Vector index failure |
+| `KC_EMBDEX_ESTATE` | Invalid index state |
+| `KC_EMBDEX_ELEXICAL` | Lexical processing failure |
+
+Building replaces the destination file and is not an atomic transaction.
+Applications needing uninterrupted readers should build under a separate
+filename and publish the completed map after success.
+
+`kc_embdex_version()` reports the generated build timestamp; it is
+separate from the binary format version. During development, only the
+current V1 layout is supported, so maps must be rebuilt when it changes.
 
 ## Next step
 
-Continue with the [Binary index](index-format.md).
+Read [Retrieval](advanced/retrieval.md) for the candidate-selection and
+ranking behavior behind the API.
