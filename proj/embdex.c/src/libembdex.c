@@ -1639,14 +1639,15 @@ static uint64_t kc_embdex_literal_starts(const kc_embdex_tokens_t *tokens,
 
         for (size_t j = 0; j < words; j++) {
             size_t length = strlen(tokens->value[start + j]);
+            size_t document_length = strcspn(cursor, " ");
 
-            if (strncmp(cursor, tokens->value[start + j], length) != 0 ||
-                (cursor[length] != ' ' && cursor[length] != '\0'))
+            if (document_length != length ||
+                memcmp(cursor, tokens->value[start + j], length) != 0)
             {
                 equal = 0;
                 break;
             }
-            cursor += length;
+            cursor += document_length;
             if (*cursor == ' ') cursor++;
         }
         if (equal) starts |= UINT64_C(1) << start;
