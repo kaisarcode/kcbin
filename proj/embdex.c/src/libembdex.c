@@ -186,6 +186,319 @@ static char *kc_embdex_copy_string(const char *input)
 }
 
 /**
+ * Identify the optional experimental word map in the existing model tag.
+ * The bytewise FNV checksum deliberately rejects reuse after map changes.
+ * @param tag Receives the complete 32-byte index model identity.
+ * @return KC_EMBDEX_OK or a file error.
+ */
+static int kc_embdex_model_identity(char tag[KC_EMBDEX_MODEL_SIZE])
+{
+    const char *path = getenv("KC_EMBDEX_WORDMAP");
+    FILE *file;
+    uint32_t digest = UINT32_C(2166136261);
+    int ch;
+
+    memset(tag, 0, KC_EMBDEX_MODEL_SIZE);
+    memcpy(tag, kc_embdex_model, sizeof(kc_embdex_model));
+    if (path == NULL || path[0] == '\0') return KC_EMBDEX_OK;
+    file = fopen(path, "rb");
+    if (file == NULL) return KC_EMBDEX_EIO;
+    while ((ch = fgetc(file)) != EOF) {
+        digest ^= (unsigned char)ch;
+        digest *= UINT32_C(16777619);
+    }
+    if (ferror(file) || fclose(file) != 0) return KC_EMBDEX_EIO;
+    memset(tag, 0, KC_EMBDEX_MODEL_SIZE);
+    if (snprintf(tag, KC_EMBDEX_MODEL_SIZE, "%s+%08" PRIx32,
+        kc_embdex_model, digest) >= KC_EMBDEX_MODEL_SIZE)
+        return KC_EMBDEX_EFORMAT;
+    return KC_EMBDEX_OK;
+}
+
+typedef struct {
+    char *value;
+    size_t count;
+    int failed;
+} kc_embdex_word_capture_t;
+
+/**
+ * Capture exactly one term through the BM25 Unicode normalizer.
+ * @param token Borrowed normalized token.
+ * @param userdata Word accumulator.
+ * @return Zero unless a duplicate token or allocation error occurs.
+ */
+static int kc_embdex_capture_word(const char *token, void *userdata)
+{
+    kc_embdex_word_capture_t *capture =
+        (kc_embdex_word_capture_t *)userdata;
+
+    capture->count++;
+    if (capture->count != 1) return 1;
+    capture->value = kc_embdex_copy_string(token);
+    if (capture->value == NULL) {
+        capture->failed = 1;
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * Normalize exactly one word using the existing BM25 analyzer.
+ * @param index Index with a built or imported lexical analyzer.
+ * @param bytes Source substring.
+ * @param size Source length.
+ * @param result Receives an owned normalized word.
+ * @return KC_EMBDEX_OK, EFORMAT, ELEXICAL or ENOMEM.
+ */
+static int kc_embdex_word_normalize(const kc_embdex_t *index,
+    const char *bytes, size_t size, char **result)
+{
+    kc_embdex_word_capture_t capture = {0};
+    char *copy;
+    int status;
+
+    *result = NULL;
+    if (size == SIZE_MAX) return KC_EMBDEX_ENOMEM;
+    copy = (char *)malloc(size + 1);
+    if (copy == NULL) return KC_EMBDEX_ENOMEM;
+    memcpy(copy, bytes, size);
+    copy[size] = '\0';
+    status = kc_bm25_tokens(index->lexical, copy,
+        kc_embdex_capture_word, &capture);
+    free(copy);
+    if (capture.failed) {
+        free(capture.value);
+        return KC_EMBDEX_ENOMEM;
+    }
+    if (status != KC_BM25_OK || capture.count != 1) {
+        free(capture.value);
+        return status == KC_BM25_EUTF8 ?
+            KC_EMBDEX_ELEXICAL : KC_EMBDEX_EFORMAT;
+    }
+    *result = capture.value;
+    return KC_EMBDEX_OK;
+}
+
+/**
+ * Sort normalized dictionary keys for binary lookups.
+ * @param a First word replacement.
+ * @param b Second word replacement.
+ * @return Standard comparison result.
+ */
+static int kc_embdex_word_compare(const void *a, const void *b)
+{
+    const kc_embdex_word_t *left = (const kc_embdex_word_t *)a;
+    const kc_embdex_word_t *right = (const kc_embdex_word_t *)b;
+
+    return strcmp(left->source, right->source);
+}
+
+/**
+ * Load an experimental UTF-8 TSV map of normalized words to English words.
+ * Mapping is deliberately optional and leaves lexical evidence unchanged.
+ * @param index Index with an initialized BM25 analyzer.
+ * @return KC_EMBDEX_OK or an error on invalid mappings and I/O.
+ */
+static int kc_embdex_wordmap_load(kc_embdex_t *index)
+{
+    const char *path = getenv("KC_EMBDEX_WORDMAP");
+    kc_embdex_word_t *next;
+    char line[2048];
+    size_t capacity = 0;
+    FILE *file;
+    int status = KC_EMBDEX_OK;
+
+    if (path == NULL || path[0] == '\0') return KC_EMBDEX_OK;
+    file = fopen(path, "rb");
+    if (file == NULL) return KC_EMBDEX_EIO;
+
+    while (fgets(line, sizeof(line), file) != NULL) {
+        size_t length = strlen(line);
+        char *tab;
+        char *normalized = NULL;
+        char *replacement;
+
+        if (length == sizeof(line) - 1 && line[length - 1] != '\n') {
+            status = KC_EMBDEX_EFORMAT;
+            break;
+        }
+        while (length != 0 &&
+            (line[length - 1] == '\r' || line[length - 1] == '\n'))
+            line[--length] = '\0';
+        if (length == 0 || line[0] == '#') continue;
+        tab = strchr(line, '\t');
+        if (tab == NULL || tab == line || strchr(tab + 1, '\t') != NULL ||
+            tab[1] == '\0')
+        {
+            status = KC_EMBDEX_EFORMAT;
+            break;
+        }
+        *tab++ = '\0';
+        for (const unsigned char *p = (const unsigned char *)tab;
+            *p != '\0'; p++)
+        {
+            if (!((*p >= 'A' && *p <= 'Z') ||
+                  (*p >= 'a' && *p <= 'z')))
+            {
+                status = KC_EMBDEX_EFORMAT;
+                break;
+            }
+        }
+        if (status != KC_EMBDEX_OK) break;
+        status = kc_embdex_word_normalize(index,
+            line, strlen(line), &normalized);
+        if (status != KC_EMBDEX_OK) break;
+        if (index->word_count >= 4096) {
+            free(normalized);
+            status = KC_EMBDEX_EFORMAT;
+            break;
+        }
+        if (index->word_count == capacity) {
+            size_t updated = capacity == 0 ? 64 : capacity * 2;
+
+            next = (kc_embdex_word_t *)realloc(index->wordmap,
+                updated * sizeof(*next));
+            if (next == NULL) {
+                free(normalized);
+                status = KC_EMBDEX_ENOMEM;
+                break;
+            }
+            index->wordmap = next;
+            capacity = updated;
+        }
+        replacement = kc_embdex_copy_string(tab);
+        if (replacement == NULL) {
+            free(normalized);
+            status = KC_EMBDEX_ENOMEM;
+            break;
+        }
+        index->wordmap[index->word_count].source = normalized;
+        index->wordmap[index->word_count].replacement = replacement;
+        index->word_count++;
+    }
+    if (ferror(file)) status = KC_EMBDEX_EIO;
+    if (fclose(file) != 0) status = KC_EMBDEX_EIO;
+    if (status != KC_EMBDEX_OK) return status;
+
+    qsort(index->wordmap, index->word_count, sizeof(*index->wordmap),
+        kc_embdex_word_compare);
+    for (size_t i = 1; i < index->word_count; i++) {
+        if (strcmp(index->wordmap[i-1].source,
+            index->wordmap[i].source) == 0)
+            return KC_EMBDEX_EFORMAT;
+    }
+    return KC_EMBDEX_OK;
+}
+
+/**
+ * Identify word bytes without treating punctuation as part of a word.
+ * Unicode bytes remain grouped and are normalized by BM25 for lookup.
+ * @param value One byte in UTF-8 text.
+ * @return Nonzero if this byte belongs to a word.
+ */
+static int kc_embdex_is_word_byte(unsigned char value)
+{
+    return value >= 128 ||
+        (value >= 'a' && value <= 'z') ||
+        (value >= 'A' && value <= 'Z') ||
+        (value >= '0' && value <= '9');
+}
+
+/**
+ * Append a byte sequence into an expanding, NUL-terminated text buffer.
+ * @param buffer Destination allocation.
+ * @param used Current content length.
+ * @param capacity Current allocated size.
+ * @param data Source bytes.
+ * @param length Number of bytes to copy.
+ * @return KC_EMBDEX_OK or ENOMEM.
+ */
+static int kc_embdex_word_append(char **buffer, size_t *used,
+    size_t *capacity, const char *data, size_t length)
+{
+    size_t required;
+    char *next;
+
+    if (length > SIZE_MAX - *used - 1) return KC_EMBDEX_ENOMEM;
+    required = *used + length + 1;
+    if (required > *capacity) {
+        size_t grown = *capacity == 0 ? 64 : *capacity;
+
+        while (grown < required) {
+            if (grown > SIZE_MAX / 2) return KC_EMBDEX_ENOMEM;
+            grown *= 2;
+        }
+        next = (char *)realloc(*buffer, grown);
+        if (next == NULL) return KC_EMBDEX_ENOMEM;
+        *buffer = next;
+        *capacity = grown;
+    }
+    memcpy(*buffer + *used, data, length);
+    *used += length;
+    (*buffer)[*used] = '\0';
+    return KC_EMBDEX_OK;
+}
+
+/**
+ * Embed with word-for-word substitution when an experimental map is enabled.
+ * Unmatched words and all punctuation are preserved byte-for-byte.
+ * @param index Index with a loaded wordmap and lexical normalizer.
+ * @param text Borrowed original input.
+ * @param vector Receives the embedding allocated by libemb.
+ * @param dimension Receives the vector length.
+ * @return KC_EMBDEX_OK or an embedding, normalization or memory error.
+ */
+static int kc_embdex_embed_text(const kc_embdex_t *index,
+    const char *text, float **vector, size_t *dimension)
+{
+    size_t used = 0, capacity = 0, size = strlen(text), offset = 0;
+    char *mapped = NULL;
+    int status = KC_EMBDEX_OK;
+
+    if (index->word_count == 0)
+        return kc_emb_embed(text, vector, dimension) == KC_EMB_OK ?
+            KC_EMBDEX_OK : KC_EMBDEX_EEMBED;
+
+    while (offset < size) {
+        size_t end = offset;
+        const char *replacement = text + offset;
+        size_t length;
+        char *normalized = NULL;
+
+        if (!kc_embdex_is_word_byte((unsigned char)text[offset])) {
+            end++;
+        } else {
+            kc_embdex_word_t key = {0}, *hit;
+
+            while (end < size &&
+                kc_embdex_is_word_byte((unsigned char)text[end]))
+                end++;
+            status = kc_embdex_word_normalize(index,
+                text + offset, end - offset, &normalized);
+            if (status != KC_EMBDEX_OK) break;
+            key.source = normalized;
+            hit = (kc_embdex_word_t *)bsearch(&key,
+                index->wordmap, index->word_count,
+                sizeof(*index->wordmap), kc_embdex_word_compare);
+            if (hit != NULL) replacement = hit->replacement;
+        }
+        length = normalized == NULL || replacement == text + offset ?
+            end - offset : strlen(replacement);
+        status = kc_embdex_word_append(&mapped, &used, &capacity,
+            replacement, length);
+        free(normalized);
+        if (status != KC_EMBDEX_OK) break;
+        offset = end;
+    }
+    if (status == KC_EMBDEX_OK)
+        status = kc_emb_embed(mapped == NULL ? text : mapped,
+            vector, dimension) == KC_EMB_OK ?
+            KC_EMBDEX_OK : KC_EMBDEX_EEMBED;
+    free(mapped);
+    return status;
+}
+
+/**
  * Allocate an index and its document-reference array.
  * @param count Number of document references to allocate.
  * @return New index or NULL if allocation fails.
