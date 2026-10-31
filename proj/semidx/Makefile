@@ -178,9 +178,12 @@ $(OUT_SHARED): $(OUT_OBJECT) $(DEP_LIBS)
 	@mkdir -p "$(OUT_DIR)"
 	@$(TARGET_CXX) $(TARGET_SHARED) -o "$@" "$(OUT_OBJECT)" $(DEP_LINKS)
 
-$(OUT_CLI): src/semidx.c src/libsemidx.h $(OUT_SHARED)
+$(OUT_CLI): src/semidx.c src/libsemidx.h $(OUT_STATIC) $(OUT_SHARED) $(DEP_LIBS)
+	@mkdir -p "$(BUILD_DIR)/$(TARGET)"
 	@$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
-		-o "$@" src/semidx.c -L"$(OUT_DIR)" -lsemidx
+		-c -o "$(BUILD_DIR)/$(TARGET)/semidx.o" src/semidx.c
+	@$(TARGET_CXX) -o "$@" "$(BUILD_DIR)/$(TARGET)/semidx.o" \
+		"$(OUT_STATIC)" $(DEP_LINKS)
 
 $(BUILD_DIR)/test/semidx-test: src/test.c src/libsemidx.h $(BIN_DIR)/$(NATIVE_TARGET)/libsemidx.$(NATIVE_EXT)
 	@mkdir -p "$(BUILD_DIR)/test"

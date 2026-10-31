@@ -93,6 +93,9 @@ alongside its existing shared library or WASM module. This static archive
 contains semidx's C code; applications linking it must also link the three
 precompiled kclib archives, using a C++ linker for the GGML code in `libemb`.
 The WASM build produces `libsemidx.wasm` and `libsemidx.a`.
+Native CLI executables are linked with `libsemidx.a` and the three kclib
+static archives, so they do not need `libsemidx.so` or kclib shared libraries
+at runtime. The shared library is still published for other consumers.
 
 ## Documentation
 
