@@ -442,6 +442,11 @@ static int kc_embdex_load_records(kc_embdex_t *index)
             return KC_EMBDEX_EFORMAT;
         }
         index->records[i].encoded = data + offset;
+        for (size_t j = 0; j < index->dimension; j++) {
+            if (!isfinite(kc_embdex_read_float(
+                index->records[i].encoded + j * sizeof(float))))
+                return KC_EMBDEX_EFORMAT;
+        }
         offset += index->dimension * sizeof(float);
     }
     return offset == index->lexical_offset ?
@@ -891,7 +896,7 @@ static int kc_embdex_fuzzy_visit(const char *term, size_t document_count,
         &distance);
     if (status == KC_LEVEN_ELIMIT) return 0;
     if (status != KC_LEVEN_OK) {
-        context->failed = 1;
+        context->failed = status;
         return 1;
     }
     if (distance == 0 || distance > context->best) return 0;
@@ -1109,8 +1114,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                 result = kc_bm25_vocabulary(index->lexical,
                     kc_embdex_fuzzy_visit, &fuzzy);
                 if (result != KC_BM25_OK || fuzzy.failed) {
-                    status = fuzzy.failed ? KC_EMBDEX_EINDEX :
-                        KC_EMBDEX_ELEXICAL;
+                    status = fuzzy.failed == KC_LEVEN_ENOMEM ?
+                        KC_EMBDEX_ENOMEM : KC_EMBDEX_ELEXICAL;
                     goto finished;
                 }
                 if (!fuzzy.ambiguous) {
