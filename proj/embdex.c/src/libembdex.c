@@ -689,6 +689,8 @@ typedef struct {
     int accepted;
     size_t final_rank;
     double score;
+    double coverage;
+    double precision;
     const char *reason;
 } kc_embdex_evidence_t;
 
@@ -1098,7 +1100,9 @@ static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
         if (item->semantic_measured)
             fprintf(file, "%.9g", item->semantic);
         else fputs("null", file);
-        fprintf(file, ",\"full_phrase\":%s,\"accepted\":%s,\"score\":",
+        fprintf(file, ",\"coverage\":%.9g,\"precision\":%.9g,"
+            "\"full_phrase\":%s,\"accepted\":%s,\"score\":",
+            item->coverage, item->precision,
             item->full_phrase ? "true" : "false",
             item->accepted ? "true" : "false");
         if (item->accepted) fprintf(file, "%.9g", item->score);
@@ -1372,6 +1376,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         }
         coverage = total_weight > 0 ? weight_covered / total_weight : 0;
         precise = total_weight > 0 ? weight_exact / total_weight : 0;
+        item->coverage = coverage;
+        item->precision = precise;
         double bm25 = item->lexical_rank != 0 ?
             10.0 / (10.0 + (double)item->lexical_rank) : 0.0;
         double semantic_score = item->semantic_found ?
