@@ -57,6 +57,8 @@ capability_name() {
     if [[ "$project_name" == lib*.c ]]; then
         stem="${project_name%.c}"
         printf '%s\n' "${stem#lib}"
+    elif [[ "$project_name" == *.c ]]; then
+        printf '%s\n' "${project_name%.c}"
     else
         printf '%s\n' "$project_name"
     fi
@@ -116,6 +118,11 @@ resolve_project() {
     local project_dir
 
     project_dir="$proj_dir/$name"
+    if is_project "$project_dir"; then
+        printf '%s\n' "$project_dir"
+        return 0
+    fi
+    project_dir="$proj_dir/$name.c"
     if is_project "$project_dir"; then
         printf '%s\n' "$project_dir"
         return 0
