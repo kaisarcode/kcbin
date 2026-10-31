@@ -73,15 +73,40 @@ kc_embdex_version. There are no public search modes.
 
 ## Retrieval
 
-The current implementation independently retrieves BM25 and HNSW
-candidates, joins them by internal ordinal, and merges their rankings
-with reciprocal-rank fusion. Semantic candidates below an initial
-cosine-similarity cutoff are excluded. The cutoff and fusion are
-provisional, not a validated universal relevance policy.
+Search automatically combines independent candidate discovery:
 
-Further stages will add vocabulary-based spelling recovery, phrase
-matching, evidence accumulation, and resource-aware candidate selection.
-Those stages do not change the intent-level public API.
+- BM25 ranks matching terms from the full query.
+- The saved BM25 vocabulary supplies normalized exact term matches and
+  postings, with no separate dictionary or Unicode analyzer.
+- Unmatched terms may be compared with indexed words by bounded Unicode
+  Levenshtein distance. Short terms and ambiguous single-word corrections
+  are rejected.
+- libngram finds complete normalized phrases and overlapping word windows.
+- libemb obtains one embedding for queries requiring semantic retrieval.
+  Cosine similarity scans small indexes directly; HNSW handles larger ones.
+
+All evidence is accumulated under the internal document ordinal. Exact
+phrase coverage, distinct matched query positions, spelling uncertainty,
+lexical rank and cosine similarity determine which associations survive
+selection and their ordering. A candidate can be discovered by any
+mechanism without first passing another mechanism's filter.
+
+For a single requested result, a complete normalized phrase match can
+avoid model inference. Queries with no sufficient evidence can return no
+results, even when the vector index has a nearest neighbor. The current
+confidence thresholds and score weights are implementation policy, not
+independently validated quality guarantees for every dataset.
+
+The index stores normalized terms and postings inside BM25's persistent
+section. Search builds temporary word coverage and phrase evidence only
+for the duration of each call. A query's lexical analysis is limited to
+its first 64 tokens to bound worst-case work; semantic inference, when
+used, still receives the complete original query. The entire input is
+checked for valid UTF-8 before lexical retrieval.
+
+Indexes up to 256 associations use exact cosine and skip a resident
+HNSW graph; larger indexes construct HNSW at open time.
+
 
 ## CLI
 
