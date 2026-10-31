@@ -1034,6 +1034,82 @@ static int kc_embdex_rank_compare(const void *left, const void *right)
 }
 
 /**
+ * Write one UTF-8 string escaped as JSON, including surrounding quotes.
+ * @param file Open trace output file.
+ * @param value NUL-terminated borrowed text.
+ * @return None.
+ */
+static void kc_embdex_json_string(FILE *file, const char *value)
+{
+    const unsigned char *p = (const unsigned char *)value;
+
+    fputc('"', file);
+    for (; *p != 0; p++) {
+        if (*p == '"' || *p == '\\') {
+            fputc('\\', file);
+            fputc(*p, file);
+        } else if (*p < 32U) {
+            fprintf(file, "\\u%04x", (unsigned int)*p);
+        } else {
+            fputc(*p, file);
+        }
+    }
+    fputc('"', file);
+}
+
+/**
+ * Append opt-in diagnostic evidence without changing the public search API.
+ * The KC_EMBDEX_TRACE environment variable supplies the destination JSONL
+ * path. It is intentionally inactive unless an application explicitly opts in.
+ * @param index Opened index with candidate ordinals.
+ * @param query Original query text.
+ * @param evidence Evidence records for every indexed association.
+ * @param count Total record count.
+ * @return None; diagnostic I/O never changes the search outcome.
+ */
+static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
+    const kc_embdex_evidence_t *evidence, size_t count)
+{
+    const char *path = getenv("KC_EMBDEX_TRACE");
+    FILE *file;
+
+    if (path == NULL || path[0] == '\0') return;
+    file = fopen(path, "a");
+    if (file == NULL) return;
+
+    for (size_t i = 0; i < count; i++) {
+        const kc_embdex_evidence_t *item = &evidence[i];
+
+        fputs("{\"query\":", file);
+        kc_embdex_json_string(file, query);
+        fprintf(file, ",\"ordinal\":%zu,\"id\":", i);
+        kc_embdex_json_string(file, index->records[i].id);
+        fprintf(file, ",\"content\":");
+        kc_embdex_json_string(file, index->records[i].content);
+        fprintf(file, ",\"exact\":\"%016" PRIx64
+            "\",\"fuzzy\":\"%016" PRIx64
+            "\",\"phrase\":\"%016" PRIx64
+            "\",\"longest\":%zu,\"bm25_rank\":%zu",
+            item->exact, item->fuzzy, item->phrase,
+            item->longest, item->lexical_rank);
+        fputs(",\"cosine\":", file);
+        if (item->semantic_found)
+            fprintf(file, "%.9g", item->semantic);
+        else fputs("null", file);
+        fprintf(file, ",\"full_phrase\":%s,\"accepted\":%s,\"score\":",
+            item->full_phrase ? "true" : "false",
+            item->accepted ? "true" : "false");
+        if (item->accepted) fprintf(file, "%.9g", item->score);
+        else fputs("null", file);
+        fputs(",\"reason\":", file);
+        kc_embdex_json_string(file,
+            item->reason == NULL ? "not_discovered" : item->reason);
+        fputs("}\n", file);
+    }
+    fclose(file);
+}
+
+/**
  * Find relevant associations from independent lexical and semantic evidence.
  * Query coverage, phrase matching and edit-distance uncertainty influence
  * selection; a fixed similarity floor excludes weak uncorroborated neighbors.
@@ -1262,7 +1338,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     }
 
     for (size_t i = 0; i < index->count; i++) {
-        const kc_embdex_evidence_t *item = &evidence[i];
+        kc_embdex_evidence_t *item = &evidence[i];
         uint64_t mask = item->exact | item->fuzzy | item->phrase;
         size_t covered = kc_embdex_popcount(mask);
         size_t exact = kc_embdex_popcount(item->exact);
@@ -1288,13 +1364,21 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         if (tokens.truncated)
             accepted = item->semantic_found &&
                 semantic_score >= semantic_only_floor;
-        if (!accepted) continue;
+        if (!accepted) {
+            item->reason = mask != 0 || item->lexical_rank != 0 ||
+                item->semantic_found ? "insufficient_evidence" :
+                "not_discovered";
+            continue;
+        }
 
+        item->accepted = 1;
+        item->reason = "accepted";
         score = 0.45 * coverage + 0.25 * precise +
             0.15 * phrase + 0.10 * bm25 +
             0.50 * semantic_score -
             0.08 * ((double)corrected / (double)tokens.count);
         if (item->full_phrase) score += 0.5;
+        item->score = score;
         ranks[rank_count].ordinal = i;
         ranks[rank_count++].score = score;
     }
@@ -1313,6 +1397,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     }
 
 finished:
+    if (status == KC_EMBDEX_OK && evidence != NULL && tokens.count > 0)
+        kc_embdex_trace(index, query, evidence, index->count);
     kc_bm25_free(lexical);
     kc_hnsw_free(semantic);
     kc_emb_free(embedding);
