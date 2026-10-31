@@ -311,25 +311,9 @@ static int kc_test_query(void)
 
 #ifndef __EMSCRIPTEN__
 /**
- * Set or unset the dictionary supplied only during index construction.
- * @param path Optional dictionary path.
- * @return Zero on success.
- */
-static int kc_test_wordmap_env(const char *path)
-{
-#ifdef _WIN32
-    return _putenv_s("KC_EMBDEX_WORDMAP", path == NULL ? "" : path);
-#else
-    return path == NULL ?
-        unsetenv("KC_EMBDEX_WORDMAP") :
-        setenv("KC_EMBDEX_WORDMAP", path, 1);
-#endif
-}
-
-/**
- * Ensure a dictionary-built mmap index is portable and self-contained.
- * The dictionary file is removed before opening and querying its index.
- * @return Zero when the persisted source and mapped lexical indexes work.
+ * Ensure several independent dictionaries compile into a self-contained map.
+ * Dictionary files are deleted before opening and querying the saved index.
+ * @return Zero when independent word substitutions work after reopen.
  */
 static int kc_test_wordmap(void)
 {
@@ -337,26 +321,36 @@ static int kc_test_wordmap(void)
         {"secret", "guardar contraseñas privadas"},
         {"garden", "cuidar plantas en el jardín"}
     };
-    const char *dictionary = "embdex-test-wordmap.tsv";
+    const char *dictionary_a = "embdex-test-dict-a.tsv";
+    const char *dictionary_b = "embdex-test-dict-b.tsv";
+    const char *dictionaries[] = { dictionary_a, dictionary_b };
     const char *path = "embdex-test-wordmap.bin";
     kc_embdex_t *index = NULL;
     kc_embdex_match_test_t result = {0};
-    FILE *file = fopen(dictionary, "wb");
+    FILE *file;
     int failed = 0;
 
     remove(path);
+    file = fopen(dictionary_a, "wb");
     if (file == NULL) failed = 1;
     else {
         failed |= fputs("guardar\tstore\n", file) == EOF;
-        failed |= fputs("claves\tpasswords\n", file) == EOF;
         failed |= fputs("contraseñas\tpasswords\n", file) == EOF;
         failed |= fclose(file) != 0;
     }
-    if (!failed) failed |= kc_test_wordmap_env(dictionary) != 0;
+    file = fopen(dictionary_b, "wb");
+    if (file == NULL) failed = 1;
+    else {
+        failed |= fputs("claves\tpasswords\n", file) == EOF;
+        failed |= fputs("claves\tkeys\n", file) == EOF;
+        failed |= fputs("guardar\tstore\n", file) == EOF;
+        failed |= fclose(file) != 0;
+    }
     if (!failed)
-        failed |= kc_embdex_build(path, documents, 2) != KC_EMBDEX_OK;
-    failed |= kc_test_wordmap_env(NULL) != 0;
-    remove(dictionary);
+        failed |= kc_embdex_build_with_dictionaries(path, documents, 2,
+            dictionaries, 2) != KC_EMBDEX_OK;
+    remove(dictionary_a);
+    remove(dictionary_b);
     if (!failed) failed |= kc_embdex_open(&index, path) != KC_EMBDEX_OK;
     if (!failed) {
         failed |= kc_embdex_search(index, "guardar claves", NULL,
@@ -367,7 +361,7 @@ static int kc_test_wordmap(void)
     kc_embdex_close(index);
     remove(path);
     return kc_test_result("wordmap",
-        "opens and searches a mapped bilingual index without its dictionary",
+        "merges dictionaries and searches standalone compiled mmap maps",
         failed);
 }
 
