@@ -123,11 +123,20 @@ cosine similarities; for larger indexes it comes from HNSW's candidate
 ordering. The relative similarity threshold comes from a bounded sample
 of the corpus, and no search mode is exposed.
 
-For a single requested result, a complete normalized phrase match can
-avoid model inference. Queries with insufficient evidence can return
-no results. These rules still cannot guarantee correct interpretation
-of contradictions or negations, and the quality of the embedding model
-strongly affects paraphrase retrieval, particularly in Spanish.
+Semantic inference is a fallback after literal retrieval. When the query
+is fully covered by a literal phrase or a complete contiguous segmentation
+of indexed associations, search ranks the lexical candidates without
+calling `libemb`. This applies regardless of the requested result limit.
+Literal matches from the compiled dictionary-normalized index also count
+toward complete coverage. Incomplete coverage, including a query with
+unmatched words, triggers semantic inference and ranking.
+
+The fallback rule measures coverage rather than trying to understand
+the query. A full set of literal associations may still be ambiguous;
+`embdex` returns ranked candidates for the caller to interpret. Truncated
+lexical queries conservatively continue to semantic inference. The
+diagnostic trace reports `variants_evaluated: 0` when embeddings were
+skipped and a positive count when inference ran.
 
 The current acceptance boundaries and score weights are provisional
 implementation policy. They require validation against positive and
