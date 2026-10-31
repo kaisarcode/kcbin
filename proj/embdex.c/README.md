@@ -38,7 +38,8 @@ Dictionaries contain word-to-word replacements, including alternative
 replacements for the same word. The binary embeds their merged contents,
 the original associations, and the precomputed retrieval structures.
 Search only needs the map; it does not load the input TSV files or
-interpret language or regional metadata.
+interpret language or regional metadata. All builds produce the same binary
+format, with or without dictionaries.
 
 ## Native library
 
