@@ -307,6 +307,11 @@ finished:
     return result;
 }
 
+typedef struct {
+    JSON_Array *results;
+    int failed;
+} embdex_output_t;
+
 /**
  * Append one borrowed search result to a JSON array.
  * @param result Ranked association.
@@ -316,17 +321,21 @@ finished:
 static int embdex_print_result(const kc_embdex_result_t *result,
     void *userdata)
 {
-    JSON_Array *results = (JSON_Array *)userdata;
+    embdex_output_t *output = (embdex_output_t *)userdata;
     JSON_Value *entry = json_value_init_object();
     JSON_Object *object;
 
-    if (entry == NULL) return 1;
+    if (entry == NULL) {
+        output->failed = 1;
+        return 1;
+    }
     object = json_value_get_object(entry);
     if (json_object_set_string(object, "id", result->id) != JSONSuccess ||
         json_object_set_number(object, "score", result->score) != JSONSuccess ||
         json_object_set_string(object, "text", result->content) != JSONSuccess ||
-        json_array_append_value(results, entry) != JSONSuccess) {
+        json_array_append_value(output->results, entry) != JSONSuccess) {
         json_value_free(entry);
+        output->failed = 1;
         return 1;
     }
     return 0;
@@ -344,19 +353,22 @@ static int embdex_search(const char *path, const char *query, size_t limit)
     kc_embdex_t *index = NULL;
     kc_embdex_search_options_t options = { .limit = &limit };
     JSON_Value *root = json_value_init_array();
-    JSON_Array *results;
+    embdex_output_t output_state = {0};
     char *output;
     int status;
 
     if (root == NULL) return 1;
-    results = json_value_get_array(root);
+    output_state.results = json_value_get_array(root);
     status = kc_embdex_open(&index, path);
     if (status == KC_EMBDEX_OK)
         status = kc_embdex_search(index, query, &options,
-            embdex_print_result, results);
+            embdex_print_result, &output_state);
     kc_embdex_close(index);
-    if (status != KC_EMBDEX_OK) {
-        fprintf(stderr, "embdex: %s\\n", kc_embdex_strerror(status));
+    if (status != KC_EMBDEX_OK || output_state.failed) {
+        if (status != KC_EMBDEX_OK)
+            fprintf(stderr, "embdex: %s\\n", kc_embdex_strerror(status));
+        else
+            fprintf(stderr, "embdex: cannot encode JSON output\\n");
         json_value_free(root);
         return 1;
     }
