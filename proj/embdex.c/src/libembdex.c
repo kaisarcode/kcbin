@@ -2588,7 +2588,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     kc_hnsw_result_t *semantic = NULL;
     kc_bm25_search_options_t lexical_options = {0};
     char *joined = NULL;
-    char *mapped_joined = NULL;
+    char *folded_query = NULL;
+    char *folded_mapped_query = NULL;
     char *mapped_query = NULL;
     char *symbol_query = NULL;
     const char *search_query = query;
@@ -2660,7 +2661,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         goto finished;
     }
     joined = kc_embdex_join(&tokens);
-    if (joined == NULL) {
+    folded_query = kc_embdex_term_fold(query);
+    if (joined == NULL || folded_query == NULL) {
         status = KC_EMBDEX_ENOMEM;
         goto finished;
     }
@@ -2673,6 +2675,11 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
             status = result;
             goto finished;
         }
+        folded_mapped_query = kc_embdex_term_fold(mapped_query);
+        if (folded_mapped_query == NULL) {
+            status = KC_EMBDEX_ENOMEM;
+            goto finished;
+        }
         result = kc_bm25_tokens(index->mapped_lexical, mapped_query,
             kc_embdex_token_add, &mapped_tokens);
         if (mapped_tokens.failed) {
@@ -2683,6 +2690,15 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
             status = KC_EMBDEX_ELEXICAL;
             goto finished;
         }
+    }
+    if (index->mapped_lexical != NULL &&
+        mapped_tokens.count == 0 && mapped_query != NULL &&
+        strcmp(mapped_query, query) != 0)
+    {
+        /* A valid dictionary target can contain nothing BM25 tokenizes. */
+        status = kc_embdex_search_untokenized(index, query,
+            limit, callback, userdata);
+        goto finished;
     }
     if (index->mapped_lexical != NULL) {
         status = kc_embdex_mapped_alignment(index, &tokens,
@@ -2699,13 +2715,6 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                 status = KC_EMBDEX_ELEXICAL;
                 goto finished;
             }
-        }
-    }
-    if (mapped_tokens.count > 0) {
-        mapped_joined = kc_embdex_join(&mapped_tokens);
-        if (mapped_joined == NULL) {
-            status = KC_EMBDEX_ENOMEM;
-            goto finished;
         }
     }
     for (size_t i = 0; i < tokens.count; i++) {
@@ -2835,8 +2844,19 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         if (!tokens.truncated)
             evidence[i].literal_starts = kc_embdex_literal_starts(
                 &tokens, document.text, &evidence[i].literal_length);
-        evidence[i].full_phrase = !tokens.truncated &&
-            kc_embdex_contains(document.text, joined, strlen(joined));
+        if (!tokens.truncated) {
+            char *folded_content = kc_embdex_term_fold(
+                index->records[i].content);
+
+            if (folded_content == NULL) {
+                free(document.text);
+                status = KC_EMBDEX_ENOMEM;
+                goto finished;
+            }
+            evidence[i].full_phrase = kc_embdex_contains_term(
+                folded_content, folded_query);
+            free(folded_content);
+        }
         if (evidence[i].full_phrase) {
             evidence[i].exact = tokens.count == 64 ?
                 UINT64_MAX : (UINT64_C(1) << tokens.count) - 1;
@@ -2859,38 +2879,54 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         if (!tokens.truncated && index->mapped_lexical != NULL &&
             mapped_tokens.count > 0 && !mapped_tokens.truncated)
         {
-            kc_embdex_text_t normalized = {0};
             char *replacement = NULL;
+            char *folded_replacement = NULL;
 
             status = kc_embdex_transform_text(index,
                 index->records[i].content, 0, NULL, &replacement);
             if (status != KC_EMBDEX_OK) goto finished;
-            result = kc_bm25_tokens(index->mapped_lexical, replacement,
-                kc_embdex_text_append, &normalized);
-            free(replacement);
-            if (result != KC_BM25_OK || normalized.failed) {
-                free(normalized.text);
-                status = normalized.failed ? KC_EMBDEX_ENOMEM :
-                    KC_EMBDEX_ELEXICAL;
+            folded_replacement = kc_embdex_term_fold(replacement);
+            if (folded_replacement == NULL) {
+                free(replacement);
+                status = KC_EMBDEX_ENOMEM;
                 goto finished;
             }
-            if (normalized.text != NULL) {
-                if (mapped_aligned)
+            evidence[i].mapped_full_phrase = kc_embdex_contains_term(
+                folded_replacement, folded_mapped_query);
+            free(folded_replacement);
+            if (mapped_aligned) {
+                kc_embdex_text_t normalized = {0};
+
+                result = kc_bm25_tokens(index->mapped_lexical, replacement,
+                    kc_embdex_text_append, &normalized);
+                if (result != KC_BM25_OK || normalized.failed) {
+                    free(replacement);
+                    free(normalized.text);
+                    status = normalized.failed ? KC_EMBDEX_ENOMEM :
+                        KC_EMBDEX_ELEXICAL;
+                    goto finished;
+                }
+                if (normalized.text != NULL)
                     evidence[i].mapped_starts = kc_embdex_literal_starts(
                         &mapped_tokens, normalized.text,
                         &evidence[i].mapped_length);
-                if (mapped_joined != NULL &&
-                    kc_embdex_contains(normalized.text,
-                        mapped_joined, strlen(mapped_joined)))
-                    evidence[i].mapped_full_phrase = 1;
+                free(normalized.text);
             }
-            free(normalized.text);
+            free(replacement);
         }
     }
 
     if (!tokens.truncated)
         literal_sufficient = kc_embdex_cover_rank(
             evidence, index->count, tokens.count);
+    if (!tokens.truncated && !mapped_tokens.truncated &&
+        mapped_tokens.count > 0)
+    {
+        for (size_t i = 0; i < index->count; i++)
+            if (kc_embdex_popcount(evidence[i].mapped_hits) ==
+                mapped_tokens.count)
+                literal_sufficient = 1;
+    }
 
     status = kc_embdex_variant_count(index, query, &variant_plan);
     if (status != KC_EMBDEX_OK) goto finished;
@@ -3147,7 +3183,8 @@ finished:
     kc_embdex_tokens_close(&tokens);
     kc_embdex_tokens_close(&mapped_tokens);
     free(joined);
-    free(mapped_joined);
+    free(folded_query);
+    free(folded_mapped_query);
     free(mapped_query);
     free(symbol_query);
     for (size_t i = 0; i < KC_EMBDEX_VARIANTS; i++)
