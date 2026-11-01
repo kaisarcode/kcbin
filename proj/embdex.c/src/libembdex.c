@@ -2157,6 +2157,12 @@ static double kc_embdex_semantic_threshold(const kc_embdex_t *index,
  * @param right Second candidate.
  * @return Comparison order.
  */
+/**
+ * Sort candidate IDs while preserving the score order within each group.
+ * @param left First ID and original score rank.
+ * @param right Second ID and original score rank.
+ * @return ID order, followed by score rank.
+ */
 static int kc_embdex_rank_id_compare(const void *left, const void *right)
 {
     const kc_embdex_rank_id_t *a = (const kc_embdex_rank_id_t *)left;
@@ -2169,12 +2175,6 @@ static int kc_embdex_rank_id_compare(const void *left, const void *right)
     return 0;
 }
 
-/**
- * Sort candidate IDs while preserving the score order within each group.
- * @param left First ID and original score rank.
- * @param right Second ID and original score rank.
- * @return ID order, followed by score rank.
- */
 static int kc_embdex_rank_compare(const void *left, const void *right)
 {
     const kc_embdex_rank_t *a = (const kc_embdex_rank_t *)left;
