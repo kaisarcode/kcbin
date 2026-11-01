@@ -110,9 +110,11 @@ int kc_embdex_build(
 );
 
 /**
- * Compile associations with any number of independent word dictionaries.
- * Each dictionary is a JSON array of source/target string objects.
- * Repeated sources provide alternative substitutions; exact duplicate pairs
+ * Compile associations with any number of independent UTF-8 term dictionaries.
+ * Each dictionary is a JSON array of source/target string objects. Terms
+ * may contain multiple words, symbols, and numbers. Longest source matches
+ * have priority and substitutions are non-recursive. Repeated sources
+ * provide alternative substitutions; exact duplicate pairs
  * across files are deduplicated. Earlier files take precedence for the
  * primary substitution used when compiling vectors and normalized BM25.
  * The resulting map embeds its merged dictionary and can be opened without
