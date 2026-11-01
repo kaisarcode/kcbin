@@ -2403,7 +2403,7 @@ static double kc_embdex_score(const kc_embdex_evidence_t *item,
 {
     double bm25 = item->lexical_rank != 0 ?
         10.0 / (10.0 + (double)item->lexical_rank) : 0.0;
-    double cosine = item->semantic_found ? item->semantic : 0;
+    double cosine = item->semantic_measured ? item->semantic : 0;
     double score = 0.45 * coverage + 0.25 * precision +
         0.15 * phrase_ratio + 0.10 * bm25 * coverage +
         0.50 * cosine - 0.08 * corrected_weight;
@@ -3071,14 +3071,15 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                 tokens.truncated, item->mapped_coverage,
                 mapped_tokens.count, mapped_tokens.truncated);
 
-        if (reason == NULL) {
-            item->reason = mask != 0 || item->lexical_rank != 0 ||
-                item->semantic_found ? "insufficient_evidence" :
-                "not_discovered";
+        if (reason == NULL && mask == 0 && item->mapped_hits == 0 &&
+            item->lexical_rank == 0 && item->mapped_rank == 0 &&
+            !item->semantic_measured)
+        {
+            item->reason = "not_discovered";
             continue;
         }
-        item->accepted = 1;
-        item->reason = reason;
+        item->accepted = reason != NULL;
+        item->reason = reason != NULL ? reason : "weak_candidate";
         score = kc_embdex_score(item, coverage, precise,
             total_weight > 0 ? weight_corrected / total_weight : 0,
             phrase);
