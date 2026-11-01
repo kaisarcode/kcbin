@@ -589,7 +589,8 @@ static int kc_test_terms(void)
         {"notfound", "not found"},
         {"cpp", "C plus plus"},
         {"coffee", "coffee"},
-        {"arrows", "⇄"}
+        {"arrows", "⇄"},
+        {"mixed", "report unsubscribe backlog"}
     };
     const struct {
         const char *query;
@@ -602,7 +603,8 @@ static int kc_test_terms(void)
         {"C++", "cpp"},
         {"café", "coffee"},
         {"↔", "arrows"},
-        {"⇄", "arrows"}
+        {"⇄", "arrows"},
+        {"dar de baja report", "mixed"}
     };
     const char *dictionary = "embdex-test-terms.json";
     const char *path = "embdex-test-terms.bin";
@@ -630,7 +632,7 @@ static int kc_test_terms(void)
         failed |= fclose(file) != 0;
     }
     if (!failed)
-        failed |= kc_embdex_build_with_dictionaries(path, documents, 8,
+        failed |= kc_embdex_build_with_dictionaries(path, documents, 9,
             paths, 1, NULL) != KC_EMBDEX_OK;
     remove(dictionary);
     if (!failed)
@@ -648,7 +650,7 @@ static int kc_test_terms(void)
     kc_embdex_close(index);
     remove(path);
     return kc_test_result("terms",
-        "matches multiword and symbolic UTF-8 dictionary terms",
+        "matches UTF-8 terms and translation with different token counts",
         failed);
 }
 
