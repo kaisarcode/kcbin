@@ -14,6 +14,7 @@
 #include "libmmap.h"
 #include "libngram.h"
 #include "libleven.h"
+#include "parson.h"
 
 #include <inttypes.h>
 #include <math.h>
@@ -357,53 +358,65 @@ static size_t kc_embdex_variant_choice(const kc_embdex_variant_plan_t *plan,
 static int kc_embdex_wordmap_read_file(kc_embdex_t *index,
     const char *path, size_t *capacity)
 {
-    kc_embdex_word_t *next;
-    char line[2048];
-    FILE *file = fopen(path, "rb");
+    JSON_Value *root = json_parse_file(path);
+    JSON_Array *array;
     int status = KC_EMBDEX_OK;
 
-    if (file == NULL) return KC_EMBDEX_EIO;
-    while (fgets(line, sizeof(line), file) != NULL) {
-        size_t length = strlen(line);
-        char *tab;
-        char *normalized = NULL;
-        char *replacement;
+    if (root == NULL) {
+        FILE *file = fopen(path, "rb");
 
-        if (length == sizeof(line) - 1 && line[length - 1] != '\n') {
+        if (file == NULL) return KC_EMBDEX_EIO;
+        fclose(file);
+        return KC_EMBDEX_EFORMAT;
+    }
+    array = json_value_get_array(root);
+    if (array == NULL) {
+        json_value_free(root);
+        return KC_EMBDEX_EFORMAT;
+    }
+    for (size_t i = 0; i < json_array_get_count(array); i++) {
+        JSON_Object *entry = json_array_get_object(array, i);
+        const char *source;
+        const char *target;
+        char *normalized = NULL;
+        char *replacement_text;
+        kc_embdex_word_t *next;
+
+        if (entry == NULL ||
+            json_object_get_value(entry, "source") == NULL ||
+            json_value_get_type(json_object_get_value(entry, "source")) != JSONString ||
+            json_object_get_value(entry, "target") == NULL ||
+            json_value_get_type(json_object_get_value(entry, "target")) != JSONString) {
             status = KC_EMBDEX_EFORMAT;
             break;
         }
-        while (length != 0 &&
-            (line[length - 1] == '\r' || line[length - 1] == '\n'))
-            line[--length] = '\0';
-        if (length == 0 || line[0] == '#') continue;
-        tab = strchr(line, '\t');
-        if (tab == NULL || tab == line || strchr(tab + 1, '\t') != NULL ||
-            tab[1] == '\0')
-        {
+        source = json_object_get_string(entry, "source");
+        target = json_object_get_string(entry, "target");
+        if (source[0] == '\0' || target[0] == '\0' ||
+            index->word_count >= 4096) {
             status = KC_EMBDEX_EFORMAT;
             break;
         }
-        *tab++ = '\0';
         {
             char *validated = NULL;
 
-            status = kc_embdex_word_normalize(index, tab,
-                strlen(tab), &validated);
+            status = kc_embdex_word_normalize(index, target,
+                strlen(target), &validated);
             free(validated);
             if (status != KC_EMBDEX_OK) break;
         }
-        status = kc_embdex_word_normalize(index,
-            line, strlen(line), &normalized);
+        status = kc_embdex_word_normalize(index, source,
+            strlen(source), &normalized);
         if (status != KC_EMBDEX_OK) break;
-        if (index->word_count >= 4096) {
-            free(normalized);
-            status = KC_EMBDEX_EFORMAT;
-            break;
-        }
         if (index->word_count == *capacity) {
             size_t updated = *capacity == 0 ? 64 : *capacity * 2;
 
+            if (updated < *capacity ||
+                updated > SIZE_MAX / sizeof(*next)) {
+                free(normalized);
+                status = KC_EMBDEX_ENOMEM;
+                break;
+            }
             next = (kc_embdex_word_t *)realloc(index->wordmap,
                 updated * sizeof(*next));
             if (next == NULL) {
@@ -414,19 +427,18 @@ static int kc_embdex_wordmap_read_file(kc_embdex_t *index,
             index->wordmap = next;
             *capacity = updated;
         }
-        replacement = kc_embdex_copy_string(tab);
-        if (replacement == NULL) {
+        replacement_text = kc_embdex_copy_string(target);
+        if (replacement_text == NULL) {
             free(normalized);
             status = KC_EMBDEX_ENOMEM;
             break;
         }
         index->wordmap[index->word_count].source = normalized;
-        index->wordmap[index->word_count].replacement = replacement;
+        index->wordmap[index->word_count].replacement = replacement_text;
         index->wordmap[index->word_count].insertion = index->word_count;
         index->word_count++;
     }
-    if (ferror(file)) status = KC_EMBDEX_EIO;
-    if (fclose(file) != 0) status = KC_EMBDEX_EIO;
+    json_value_free(root);
     return status;
 }
 
