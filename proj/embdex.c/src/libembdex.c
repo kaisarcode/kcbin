@@ -78,6 +78,7 @@ struct kc_embdex {
     size_t wordmap_size;
     kc_embdex_word_t *wordmap;
     size_t word_count;
+    size_t max_term_length;
     char model_tag[KC_EMBDEX_MODEL_SIZE];
 };
 
@@ -202,45 +203,21 @@ static char *kc_embdex_copy_string(const char *input)
     return copy;
 }
 
-typedef struct {
-    char *value;
-    size_t count;
-    int failed;
-} kc_embdex_word_capture_t;
-
 /**
- * Capture exactly one term through the BM25 Unicode normalizer.
- * @param token Borrowed normalized token.
- * @param userdata Word accumulator.
- * @return Zero unless a duplicate token or allocation error occurs.
+ * Validate UTF-8 terms without imposing lexical token boundaries.
+ * BM25 is used solely as a UTF-8 validator here; punctuation and symbols
+ * are retained verbatim in the dictionary key.
  */
-static int kc_embdex_capture_word(const char *token, void *userdata)
+static int kc_embdex_term_ignore(const char *token, void *userdata)
 {
-    kc_embdex_word_capture_t *capture =
-        (kc_embdex_word_capture_t *)userdata;
-
-    capture->count++;
-    if (capture->count != 1) return 1;
-    capture->value = kc_embdex_copy_string(token);
-    if (capture->value == NULL) {
-        capture->failed = 1;
-        return 1;
-    }
+    (void)token;
+    (void)userdata;
     return 0;
 }
 
-/**
- * Normalize exactly one word using the existing BM25 analyzer.
- * @param index Index with a built or imported lexical analyzer.
- * @param bytes Source substring.
- * @param size Source length.
- * @param result Receives an owned normalized word.
- * @return KC_EMBDEX_OK, EFORMAT, ELEXICAL or ENOMEM.
- */
-static int kc_embdex_word_normalize(const kc_embdex_t *index,
+static int kc_embdex_term_normalize(const kc_embdex_t *index,
     const char *bytes, size_t size, char **result)
 {
-    kc_embdex_word_capture_t capture = {0};
     char *copy;
     int status;
 
@@ -251,22 +228,22 @@ static int kc_embdex_word_normalize(const kc_embdex_t *index,
     memcpy(copy, bytes, size);
     copy[size] = '\0';
     status = kc_bm25_tokens(index->lexical, copy,
-        kc_embdex_capture_word, &capture);
-    free(copy);
-    if (capture.failed) {
-        free(capture.value);
-        return KC_EMBDEX_ENOMEM;
-    }
-    if (status != KC_BM25_OK || capture.count != 1) {
-        free(capture.value);
+        kc_embdex_term_ignore, NULL);
+    if (status != KC_BM25_OK) {
+        free(copy);
         return status == KC_BM25_EUTF8 ?
             KC_EMBDEX_ELEXICAL : KC_EMBDEX_EFORMAT;
     }
-    *result = capture.value;
+    /* ASCII case folding does not strip any UTF-8 code point or symbol. */
+    for (size_t i = 0; i < size; i++)
+        if (copy[i] >= 'A' && copy[i] <= 'Z')
+            copy[i] = (char)(copy[i] - 'A' + 'a');
+    *result = copy;
     return KC_EMBDEX_OK;
 }
 
 /**
+ * Sort normalized dictionary keys for binary lookups./**
  * Sort normalized dictionary keys for binary lookups.
  * @param a First word replacement.
  * @param b Second word replacement.
@@ -287,15 +264,25 @@ static int kc_embdex_word_compare(const void *a, const void *b)
 }
 
 /**
- * Find the first candidate translation by source word.
- * Multiple dictionary lines may share a source term, in file order.
- * @param index Index with its loaded dictionary.
- * @param word BM25-normalized source term.
- * @param count Receives number of translations available.
- * @return Start position, or zero with count zero when absent.
+ * Compare a complete dictionary term with a byte slice.
+ * A term may contain any non-NUL UTF-8 sequence.
  */
-static size_t kc_embdex_word_find(const kc_embdex_t *index,
-    const char *word, size_t *count)
+static int kc_embdex_term_compare_slice(const char *term,
+    const char *slice, size_t length)
+{
+    size_t term_length = strlen(term);
+    size_t shared = term_length < length ? term_length : length;
+    int order = memcmp(term, slice, shared);
+
+    if (order != 0) return order;
+    return term_length < length ? -1 : term_length > length ? 1 : 0;
+}
+
+/**
+ * Find all ordered alternatives for a complete term slice.
+ */
+static size_t kc_embdex_term_find(const kc_embdex_t *index,
+    const char *text, size_t length, size_t *count)
 {
     size_t low = 0, high = index->word_count, first;
 
@@ -303,21 +290,22 @@ static size_t kc_embdex_word_find(const kc_embdex_t *index,
     while (low < high) {
         size_t mid = low + (high - low) / 2;
 
-        if (strcmp(index->wordmap[mid].source, word) < 0)
+        if (kc_embdex_term_compare_slice(
+            index->wordmap[mid].source, text, length) < 0)
             low = mid + 1;
         else high = mid;
     }
     first = low;
     while (low < index->word_count &&
-        strcmp(index->wordmap[low].source, word) == 0)
-    {
+        kc_embdex_term_compare_slice(
+            index->wordmap[low].source, text, length) == 0)
         low++;
-    }
     *count = low - first;
     return first;
 }
 
 /**
+ * Select a translation for one term in a bounded query variant./**
  * Select a translation for one word in a bounded query variant.
  * Enumerate all combinations when possible; otherwise vary words across
  * the entire query with staggered masks. The first variant is the baseline.
@@ -400,12 +388,12 @@ static int kc_embdex_wordmap_read_file(kc_embdex_t *index,
         {
             char *validated = NULL;
 
-            status = kc_embdex_word_normalize(index, target,
+            status = kc_embdex_term_normalize(index, target,
                 strlen(target), &validated);
             free(validated);
             if (status != KC_EMBDEX_OK) break;
         }
-        status = kc_embdex_word_normalize(index, source,
+        status = kc_embdex_term_normalize(index, source,
             strlen(source), &normalized);
         if (status != KC_EMBDEX_OK) break;
         if (index->word_count == *capacity) {
@@ -494,6 +482,13 @@ static int kc_embdex_wordmap_load(kc_embdex_t *index,
         }
         index->word_count = retained;
     }
+    index->max_term_length = 0;
+    for (size_t i = 0; i < index->word_count; i++) {
+        size_t length = strlen(index->wordmap[i].source);
+
+        if (length > index->max_term_length)
+            index->max_term_length = length;
+    }
     return KC_EMBDEX_OK;
 }
 
@@ -531,40 +526,121 @@ static int kc_embdex_wordmap_identity(kc_embdex_t *index)
 }
 
 /**
- * Identify word bytes without treating punctuation as part of a word.
- * Unicode bytes remain grouped and are normalized by BM25 for lookup.
- * @param value One byte in UTF-8 text.
- * @return Nonzero if this byte belongs to a word.
+ * Read the UTF-8 code point at a known character boundary.
+ * All callers have already validated their input through BM25.
  */
-static int kc_embdex_is_word_byte(unsigned char value)
+static uint32_t kc_embdex_codepoint(const char *text, size_t pos)
 {
-    return value >= 128 ||
-        (value >= 'a' && value <= 'z') ||
-        (value >= 'A' && value <= 'Z') ||
-        (value >= '0' && value <= '9');
+    const unsigned char *p = (const unsigned char *)text + pos;
+
+    if (p[0] < 0x80U) return p[0];
+    if (p[0] < 0xe0U)
+        return ((uint32_t)(p[0] & 0x1fU) << 6) | (p[1] & 0x3fU);
+    if (p[0] < 0xf0U)
+        return ((uint32_t)(p[0] & 0x0fU) << 12) |
+            ((uint32_t)(p[1] & 0x3fU) << 6) | (p[2] & 0x3fU);
+    return ((uint32_t)(p[0] & 0x07U) << 18) |
+        ((uint32_t)(p[1] & 0x3fU) << 12) |
+        ((uint32_t)(p[2] & 0x3fU) << 6) | (p[3] & 0x3fU);
+}
+
+static size_t kc_embdex_previous_codepoint(const char *text, size_t pos)
+{
+    size_t previous = pos - 1;
+
+    while (previous != 0 &&
+        (((unsigned char)text[previous] & 0xc0U) == 0x80U))
+        previous--;
+    return previous;
 }
 
 /**
- * Recognize common UTF-8 punctuation which must not be absorbed into a
- * translated word, including inverted Spanish question/exclamation marks.
- * @param text Remaining UTF-8 bytes.
- * @param length Remaining byte count.
- * @return Punctuation sequence width, otherwise zero.
+ * Prevent ordinary words from matching inside larger words. Non-word UTF-8
+ * symbols, operators and emojis may appear adjacent to other characters.
  */
-static size_t kc_embdex_punctuation_width(const char *text, size_t length)
+static int kc_embdex_term_is_word(uint32_t cp)
 {
-    const unsigned char *p = (const unsigned char *)text;
-
-    if (length >= 2 && p[0] == 0xc2 &&
-        (p[1] == 0xa1 || p[1] == 0xbf))
-        return 2;
-    if (length >= 3 && p[0] == 0xe2 && p[1] == 0x80 &&
-        p[2] >= 0x90 && p[2] <= 0xa6)
-        return 3;
-    return 0;
+    if (cp < 128U)
+        return (cp >= 'a' && cp <= 'z') ||
+            (cp >= 'A' && cp <= 'Z') ||
+            (cp >= '0' && cp <= '9') || cp == '_';
+    if ((cp >= 0x2000U && cp <= 0x2bffU) ||
+        (cp >= 0x1f000U && cp <= 0x1ffffU) ||
+        (cp >= 0xfe00U && cp <= 0xfe0fU) ||
+        (cp >= 0x00a0U && cp <= 0x00bfU &&
+            cp != 0x00aaU && cp != 0x00baU))
+        return 0;
+    return 1;
 }
 
 /**
+ * A dictionary source matches as a complete term, not as a substring
+ * within a larger alphanumeric token.
+ */
+static int kc_embdex_term_boundary(const char *text,
+    size_t size, size_t start, size_t length)
+{
+    size_t end = start + length;
+    size_t last = kc_embdex_previous_codepoint(text, end);
+
+    if (start != 0 &&
+        kc_embdex_term_is_word(kc_embdex_codepoint(text, start)) &&
+        kc_embdex_term_is_word(kc_embdex_codepoint(
+            text, kc_embdex_previous_codepoint(text, start))))
+        return 0;
+    if (end < size &&
+        kc_embdex_term_is_word(kc_embdex_codepoint(text, last)) &&
+        kc_embdex_term_is_word(kc_embdex_codepoint(text, end)))
+        return 0;
+    return 1;
+}
+
+/**
+ * Case fold ASCII while keeping all UTF-8 symbols and original byte positions.
+ */
+static char *kc_embdex_term_fold(const char *text)
+{
+    char *copy = kc_embdex_copy_string(text);
+
+    if (copy == NULL) return NULL;
+    for (size_t i = 0; copy[i] != '\0'; i++)
+        if (copy[i] >= 'A' && copy[i] <= 'Z')
+            copy[i] = (char)(copy[i] - 'A' + 'a');
+    return copy;
+}
+
+/**
+ * Find the longest complete source term beginning at the given byte offset.
+ * Source terms remain sorted; exact binary searches avoid scanning the full
+ * dictionary for every character of a query.
+ */
+static size_t kc_embdex_term_match(const kc_embdex_t *index,
+    const char *folded, size_t size, size_t offset,
+    size_t *first, size_t *alternatives)
+{
+    size_t limit = size - offset, best = 0;
+
+    *first = 0;
+    *alternatives = 0;
+    if (limit > index->max_term_length)
+        limit = index->max_term_length;
+    for (size_t length = 1; length <= limit; length++) {
+        size_t found = 0;
+        size_t start = kc_embdex_term_find(index,
+            folded + offset, length, &found);
+
+        if (found != 0 &&
+            kc_embdex_term_boundary(folded, size, offset, length)) {
+            best = length;
+            *first = start;
+            *alternatives = found;
+        }
+    }
+    return best;
+}
+
+/**
+ * Append a byte sequence into an expanding, NUL-terminated text buffer./**
  * Append a byte sequence into an expanding, NUL-terminated text buffer.
  * @param buffer Destination allocation.
  * @param used Current content length.
@@ -600,13 +676,9 @@ static int kc_embdex_word_append(char **buffer, size_t *used,
 }
 
 /**
- * Substitute dictionary words while preserving unmatched text and punctuation.
- * @param index Index with a dictionary and lexical normalizer.
- * @param text Borrowed input text.
- * @param variant Selected dictionary variant.
- * @param plan Optional variant selection policy.
- * @param output Receives owned, NUL-terminated substituted text.
- * @return KC_EMBDEX_OK or a negative error status.
+ * Substitute complete UTF-8 terms, always favoring the longest source match.
+ * Scan the original input once: substitutions are never recursively expanded.
+ * Unmatched bytes and punctuation are preserved exactly.
  */
 static int kc_embdex_transform_text(const kc_embdex_t *index,
     const char *text, size_t variant,
@@ -614,7 +686,7 @@ static int kc_embdex_transform_text(const kc_embdex_t *index,
 {
     size_t used = 0, capacity = 0, size = strlen(text), offset = 0;
     size_t stride = 1, ambiguous = 0;
-    char *mapped = NULL;
+    char *mapped = NULL, *folded = NULL;
     int status = KC_EMBDEX_OK;
 
     *output = NULL;
@@ -622,52 +694,35 @@ static int kc_embdex_transform_text(const kc_embdex_t *index,
         *output = kc_embdex_copy_string(text);
         return *output == NULL ? KC_EMBDEX_ENOMEM : KC_EMBDEX_OK;
     }
+    folded = kc_embdex_term_fold(text);
+    if (folded == NULL) return KC_EMBDEX_ENOMEM;
     while (offset < size) {
-        size_t end = offset;
+        size_t first = 0, alternatives = 0;
+        size_t length = kc_embdex_term_match(index,
+            folded, size, offset, &first, &alternatives);
         const char *replacement = text + offset;
-        size_t length;
-        char *normalized = NULL;
-        size_t punctuation = kc_embdex_punctuation_width(
-            text + offset, size - offset);
+        size_t replacement_length = 1;
 
-        if (punctuation != 0 ||
-            !kc_embdex_is_word_byte((unsigned char)text[offset])) {
-            end += punctuation == 0 ? 1 : punctuation;
-        } else {
-            size_t first, alternatives;
+        if (length > 0) {
+            size_t choice = kc_embdex_variant_choice(plan,
+                variant, ambiguous, stride, alternatives);
 
-            while (end < size &&
-                kc_embdex_punctuation_width(text + end, size - end) == 0 &&
-                kc_embdex_is_word_byte((unsigned char)text[end]))
-                end++;
-            status = kc_embdex_word_normalize(index,
-                text + offset, end - offset, &normalized);
-            if (status == KC_EMBDEX_EFORMAT) status = KC_EMBDEX_OK;
-            else if (status != KC_EMBDEX_OK) break;
-            if (normalized != NULL) {
-                first = kc_embdex_word_find(index, normalized,
-                    &alternatives);
-                if (alternatives != 0) {
-                    size_t choice = kc_embdex_variant_choice(plan,
-                        variant, ambiguous, stride, alternatives);
-
-                    replacement = index->wordmap[first + choice].replacement;
-                    if (alternatives > 1) {
-                        ambiguous++;
-                        stride = stride > KC_EMBDEX_VARIANTS / alternatives ?
-                            KC_EMBDEX_VARIANTS : stride * alternatives;
-                    }
-                }
+            replacement = index->wordmap[first + choice].replacement;
+            replacement_length = strlen(replacement);
+            if (alternatives > 1) {
+                ambiguous++;
+                stride = stride > KC_EMBDEX_VARIANTS / alternatives ?
+                    KC_EMBDEX_VARIANTS : stride * alternatives;
             }
+        } else {
+            length = 1;
         }
-        length = normalized == NULL || replacement == text + offset ?
-            end - offset : strlen(replacement);
         status = kc_embdex_word_append(&mapped, &used, &capacity,
-            replacement, length);
-        free(normalized);
+            replacement, replacement_length);
         if (status != KC_EMBDEX_OK) break;
-        offset = end;
+        offset += length;
     }
+    free(folded);
     if (status == KC_EMBDEX_OK && mapped == NULL) {
         mapped = kc_embdex_copy_string(text);
         if (mapped == NULL) status = KC_EMBDEX_ENOMEM;
@@ -681,6 +736,7 @@ static int kc_embdex_transform_text(const kc_embdex_t *index,
 }
 
 /**
+ * Embed original or literally substituted terms using the selected variant./**
  * Embed original or literally substituted words using the selected variant.
  * The mapped string is temporary and never alters stored document content.
  * @param index Index with an optional dictionary.
@@ -1137,6 +1193,8 @@ static int kc_embdex_load_wordmap(kc_embdex_t *index)
         index->wordmap[i].replacement = replacement;
         index->wordmap[i].insertion = i;
         index->word_count++;
+        if (source_length > index->max_term_length)
+            index->max_term_length = source_length;
         if (i != 0 && strcmp(index->wordmap[i-1].source, source) > 0)
             return KC_EMBDEX_EFORMAT;
     }
@@ -2174,39 +2232,43 @@ static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
 }
 
 /**
- * Bound the number of heuristic word-substitution variants per query.
- * The baseline experiment compares one translation; ambiguous queries
- * can be tested with up to eight deterministic word combinations.
- * @param index Index with its loaded dictionary.
- * @param tokens Normalized query words.
- * @param plan Receives the bounded variant plan.
- * @return void
+ * Bound substitution combinations over complete matched source terms,
+ * not the individual tokens produced by BM25.
  */
-static void kc_embdex_variant_count(const kc_embdex_t *index,
-    const kc_embdex_tokens_t *tokens, kc_embdex_variant_plan_t *plan)
+static int kc_embdex_variant_count(const kc_embdex_t *index,
+    const char *query, kc_embdex_variant_plan_t *plan)
 {
-    size_t combinations = 1;
+    size_t combinations = 1, size = strlen(query), offset = 0;
     const size_t budget = KC_EMBDEX_VARIANTS;
+    char *folded;
 
     plan->count = 1;
     plan->ambiguous = 0;
     plan->exhaustive = 1;
-    if (index->word_count == 0) return;
-    for (size_t i = 0; i < tokens->count; i++) {
-        size_t alternatives = 0;
+    if (index->word_count == 0) return KC_EMBDEX_OK;
+    folded = kc_embdex_term_fold(query);
+    if (folded == NULL) return KC_EMBDEX_ENOMEM;
+    while (offset < size) {
+        size_t first, alternatives;
+        size_t length = kc_embdex_term_match(index,
+            folded, size, offset, &first, &alternatives);
 
-        kc_embdex_word_find(index, tokens->value[i], &alternatives);
+        (void)first;
         if (alternatives > 1) {
             plan->ambiguous++;
             combinations = combinations > budget / alternatives ?
                 budget + 1 : combinations * alternatives;
         }
+        offset += length != 0 ? length : 1;
     }
+    free(folded);
     plan->count = combinations > budget ? budget : combinations;
     plan->exhaustive = combinations <= budget;
+    return KC_EMBDEX_OK;
 }
 
 /**
+ * Determine whether independent retrieval evidence justifies a result./**
  * Determine whether independent retrieval evidence justifies a result.
  * The BM25 rank is a discovery signal, not an acceptance shortcut.
  * @param item Combined evidence for one association.
@@ -2306,7 +2368,10 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     kc_hnsw_result_t *semantic = NULL;
     kc_bm25_search_options_t lexical_options = {0};
     char *joined = NULL;
+    char *mapped_joined = NULL;
     char *mapped_query = NULL;
+    char *symbol_query = NULL;
+    const char *search_query = query;
     float *embedding = NULL;
     size_t dimension = 0, limit = 10, window, lexical_count = 0;
     size_t mapped_lexical_count = 0;
@@ -2351,6 +2416,25 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
             goto finished;
         }
     }
+    if (tokens.count == 0 && index->word_count != 0) {
+        int result;
+
+        /* Symbols and emoji may have dictionary translations even though
+         * the lexical analyzer returns no tokens for their source. */
+        status = kc_embdex_transform_text(index, query,
+            0, NULL, &symbol_query);
+        if (status != KC_EMBDEX_OK) goto finished;
+        if (strcmp(symbol_query, query) != 0) {
+            result = kc_bm25_tokens(index->lexical, symbol_query,
+                kc_embdex_token_add, &tokens);
+            if (result != KC_BM25_OK || tokens.failed) {
+                status = tokens.failed ? KC_EMBDEX_ENOMEM :
+                    KC_EMBDEX_ELEXICAL;
+                goto finished;
+            }
+            search_query = symbol_query;
+        }
+    }
     if (tokens.count == 0) goto finished;
     joined = kc_embdex_join(&tokens);
     if (joined == NULL) {
@@ -2391,6 +2475,13 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                 status = KC_EMBDEX_ELEXICAL;
                 goto finished;
             }
+        }
+    }
+    if (mapped_tokens.count > 0) {
+        mapped_joined = kc_embdex_join(&mapped_tokens);
+        if (mapped_joined == NULL) {
+            status = KC_EMBDEX_ENOMEM;
+            goto finished;
         }
     }
     for (size_t i = 0; i < tokens.count; i++) {
@@ -2456,7 +2547,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     if (window > index->count) window = index->count;
     lexical_options.limit = &window;
     {
-        int result = kc_bm25_search(index->lexical, query,
+        int result = kc_bm25_search(index->lexical, search_query,
             &lexical_options, &lexical, &lexical_count);
 
         if (result != KC_BM25_OK) {
@@ -2542,8 +2633,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         }
         free(document.text);
         if (!tokens.truncated && index->mapped_lexical != NULL &&
-            mapped_tokens.count == tokens.count &&
-            !mapped_tokens.truncated)
+            mapped_tokens.count > 0 && !mapped_tokens.truncated)
         {
             kc_embdex_text_t normalized = {0};
             char *replacement = NULL;
@@ -2561,9 +2651,22 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                 goto finished;
             }
             if (normalized.text != NULL) {
-                evidence[i].mapped_starts = kc_embdex_literal_starts(
-                    &mapped_tokens, normalized.text,
-                    &evidence[i].mapped_length);
+                if (mapped_tokens.count == tokens.count) {
+                    evidence[i].mapped_starts = kc_embdex_literal_starts(
+                        &mapped_tokens, normalized.text,
+                        &evidence[i].mapped_length);
+                } else if (mapped_joined != NULL &&
+                    kc_embdex_contains(normalized.text,
+                        mapped_joined, strlen(mapped_joined)))
+                {
+                    /* A complete translated phrase covers the source
+                     * even when translation changes its token count. */
+                    evidence[i].full_phrase = 1;
+                    evidence[i].mapped = tokens.count == 64 ?
+                        UINT64_MAX :
+                        (UINT64_C(1) << tokens.count) - 1;
+                    evidence[i].longest = tokens.count;
+                }
             }
             free(normalized.text);
         }
@@ -2573,7 +2676,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         literal_sufficient = kc_embdex_cover_rank(
             evidence, index->count, tokens.count);
 
-    kc_embdex_variant_count(index, &tokens, &variant_plan);
+    status = kc_embdex_variant_count(index, query, &variant_plan);
+    if (status != KC_EMBDEX_OK) goto finished;
     variants = variant_plan.count;
     if (getenv("KC_EMBDEX_TRACE") != NULL &&
         getenv("KC_EMBDEX_TRACE")[0] != '\0')
@@ -2822,7 +2926,9 @@ finished:
     kc_embdex_tokens_close(&tokens);
     kc_embdex_tokens_close(&mapped_tokens);
     free(joined);
+    free(mapped_joined);
     free(mapped_query);
+    free(symbol_query);
     for (size_t i = 0; i < KC_EMBDEX_VARIANTS; i++)
         free(variant_text[i]);
     free(variant_scores);
