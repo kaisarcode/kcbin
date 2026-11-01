@@ -1583,6 +1583,11 @@ typedef struct {
 } kc_embdex_rank_t;
 
 typedef struct {
+    const char *id;
+    size_t rank;
+} kc_embdex_rank_id_t;
+
+typedef struct {
     kc_embdex_evidence_t *evidence;
     size_t count;
     size_t position;
@@ -2151,6 +2156,24 @@ static double kc_embdex_semantic_threshold(const kc_embdex_t *index,
  * @param left First candidate.
  * @param right Second candidate.
  * @return Comparison order.
+ */
+static int kc_embdex_rank_id_compare(const void *left, const void *right)
+{
+    const kc_embdex_rank_id_t *a = (const kc_embdex_rank_id_t *)left;
+    const kc_embdex_rank_id_t *b = (const kc_embdex_rank_id_t *)right;
+    int order = strcmp(a->id, b->id);
+
+    if (order != 0) return order;
+    if (a->rank < b->rank) return -1;
+    if (a->rank > b->rank) return 1;
+    return 0;
+}
+
+/**
+ * Sort candidate IDs while preserving the score order within each group.
+ * @param left First ID and original score rank.
+ * @param right Second ID and original score rank.
+ * @return ID order, followed by score rank.
  */
 static int kc_embdex_rank_compare(const void *left, const void *right)
 {
@@ -3097,21 +3120,36 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
 
     qsort(ranks, rank_count, sizeof(*ranks), kc_embdex_rank_compare);
     /*
-     * Each association remains eligible, but repeated IDs must not
-     * monopolize a bounded candidate list. Discount lower-ranked
-     * associations of the same ID, then order by the adjusted scores.
+     * Preserve every association, while discounting repeated IDs so
+     * one command cannot occupy the entire bounded result list.
      */
-    for (size_t i = 0; i < rank_count; i++) {
-        const char *id = index->records[ranks[i].ordinal].id;
-        size_t earlier = 0;
+    {
+        kc_embdex_rank_id_t *ids = (kc_embdex_rank_id_t *)malloc(
+            rank_count * sizeof(*ids));
 
-        for (size_t j = 0; j < i; j++)
-            if (strcmp(id, index->records[ranks[j].ordinal].id) == 0)
-                earlier++;
-        if (earlier != 0) {
-            ranks[i].score /= (double)(earlier + 1);
-            evidence[ranks[i].ordinal].score = ranks[i].score;
+        if (ids == NULL && rank_count != 0) {
+            status = KC_EMBDEX_ENOMEM;
+            goto finished;
         }
+        for (size_t i = 0; i < rank_count; i++) {
+            ids[i].id = index->records[ranks[i].ordinal].id;
+            ids[i].rank = i;
+        }
+        qsort(ids, rank_count, sizeof(*ids),
+            kc_embdex_rank_id_compare);
+        for (size_t i = 0, repeated = 0; i < rank_count; i++) {
+            if (i == 0 || strcmp(ids[i].id, ids[i - 1].id) != 0)
+                repeated = 0;
+            else
+                repeated++;
+            if (repeated != 0) {
+                size_t position = ids[i].rank;
+                ranks[position].score /= (double)(repeated + 1);
+                evidence[ranks[position].ordinal].score =
+                    ranks[position].score;
+            }
+        }
+        free(ids);
     }
     qsort(ranks, rank_count, sizeof(*ranks), kc_embdex_rank_compare);
     for (size_t i = 0; i < rank_count; i++)
