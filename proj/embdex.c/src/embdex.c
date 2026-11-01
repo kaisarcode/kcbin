@@ -366,9 +366,9 @@ static int embdex_search(const char *path, const char *query, size_t limit)
     kc_embdex_close(index);
     if (status != KC_EMBDEX_OK || output_state.failed) {
         if (status != KC_EMBDEX_OK)
-            fprintf(stderr, "embdex: %s\\n", kc_embdex_strerror(status));
+            fprintf(stderr, "embdex: %s\n", kc_embdex_strerror(status));
         else
-            fprintf(stderr, "embdex: cannot encode JSON output\\n");
+            fprintf(stderr, "embdex: cannot encode JSON output\n");
         json_value_free(root);
         return 1;
     }
