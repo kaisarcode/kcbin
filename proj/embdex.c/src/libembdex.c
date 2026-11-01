@@ -243,7 +243,6 @@ static int kc_embdex_term_normalize(const kc_embdex_t *index,
 }
 
 /**
- * Sort normalized dictionary keys for binary lookups./**
  * Sort normalized dictionary keys for binary lookups.
  * @param a First word replacement.
  * @param b Second word replacement.
@@ -305,8 +304,7 @@ static size_t kc_embdex_term_find(const kc_embdex_t *index,
 }
 
 /**
- * Select a translation for one term in a bounded query variant./**
- * Select a translation for one word in a bounded query variant.
+ * Select a translation for one term in a bounded query variant.
  * Enumerate all combinations when possible; otherwise vary words across
  * the entire query with staggered masks. The first variant is the baseline.
  * @param plan Per-query budget and selection strategy.
@@ -640,7 +638,6 @@ static size_t kc_embdex_term_match(const kc_embdex_t *index,
 }
 
 /**
- * Append a byte sequence into an expanding, NUL-terminated text buffer./**
  * Append a byte sequence into an expanding, NUL-terminated text buffer.
  * @param buffer Destination allocation.
  * @param used Current content length.
@@ -736,8 +733,7 @@ static int kc_embdex_transform_text(const kc_embdex_t *index,
 }
 
 /**
- * Embed original or literally substituted terms using the selected variant./**
- * Embed original or literally substituted words using the selected variant.
+ * Embed original or literally substituted terms using the selected variant.
  * The mapped string is temporary and never alters stored document content.
  * @param index Index with an optional dictionary.
  * @param text Original input text.
@@ -2268,7 +2264,6 @@ static int kc_embdex_variant_count(const kc_embdex_t *index,
 }
 
 /**
- * Determine whether independent retrieval evidence justifies a result./**
  * Determine whether independent retrieval evidence justifies a result.
  * The BM25 rank is a discovery signal, not an acceptance shortcut.
  * @param item Combined evidence for one association.
