@@ -1,0 +1,6 @@
+bin/
+lib/
+dist/
+.build
+PLAN.md
+HANDOVER.md

@@ -2887,10 +2887,6 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
             variant_scores[i] = NAN;
     }
     {
-        /*
-         * Covering a query with separate associations does not prove that
-         * retrieval is complete. Only a whole-phrase match skips inference.
-         */
         if (!tokens.truncated) {
             for (size_t i = 0; i < index->count; i++)
                 if (evidence[i].full_phrase ||
