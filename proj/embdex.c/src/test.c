@@ -138,7 +138,8 @@ static int kc_test_duplicates(void)
 {
     const kc_embdex_document_t documents[] = {
         {"shared", "authentication between peers"},
-        {"shared", "authentication between clients"}
+        {"shared", "authentication between clients"},
+        {"other", "authentication between devices"}
     };
     const char *path = "embdex-test-duplicates.bin";
     kc_embdex_t *index = NULL;
@@ -146,17 +147,24 @@ static int kc_test_duplicates(void)
     int failed = 0;
 
     remove(path);
-    failed |= kc_embdex_build(path, documents, 2) != KC_EMBDEX_OK;
+    failed |= kc_embdex_build(path, documents, 3) != KC_EMBDEX_OK;
     if (!failed) failed |= kc_embdex_open(&index, path) != KC_EMBDEX_OK;
     if (!failed) {
         failed |= kc_embdex_search(index, "authentication", NULL,
             kc_test_receive, &state) != KC_EMBDEX_OK;
-        failed |= state.count != 2 || state.repeated != 2;
+        failed |= state.count != 3 || state.repeated != 2;
+        state = (kc_test_results_t){0};
+        state.ordered = 1;
+        state.maximum = 2;
+        failed |= kc_embdex_search(index, "authentication", NULL,
+            kc_test_receive, &state) != KC_EMBDEX_OK;
+        failed |= state.count != 2 || state.repeated != 1 ||
+            !state.ordered;
     }
     kc_embdex_close(index);
     remove(path);
     return kc_test_result("duplicates",
-        "keeps duplicate IDs as distinct indexed records", failed);
+        "retains associations and diversifies bounded candidate IDs", failed);
 }
 
 /**
