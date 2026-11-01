@@ -113,6 +113,11 @@ static int kc_test_search(void)
         failed |= kc_embdex_search(index, "authentication", NULL,
             kc_test_receive, &state) != KC_EMBDEX_OK;
         failed |= state.count != 1;
+        state = (kc_test_results_t){0};
+        state.ordered = 1;
+        failed |= kc_embdex_search(index, "unrecognized distant satellites",
+            &options, kc_test_receive, &state) != KC_EMBDEX_OK;
+        failed |= state.count != 3 || !state.ordered;
         options.limit = &zero;
         state = (kc_test_results_t){0};
         failed |= kc_embdex_search(index, "authentication", &options,
