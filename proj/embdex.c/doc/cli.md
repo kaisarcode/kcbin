@@ -68,6 +68,17 @@ other UTF-8 characters are compared literally. The compiled map
 contains the merged dictionary and does not need the input files during
 search. Dictionaries are optional.
 
+The included [Spanish-English dictionary](../data/es-en.json) contains 49,174
+source/target pairs from 28,902 source terms, generated from
+[spanish-english-json](https://github.com/fufu70/spanish-english-json)
+at commit `fd5a2af833a47003982cf63bd49efdc2e9c3a18d`, using its
+`es-en-words.json` and `es-en-verbs.json` lists. The source package declares
+ISC licensing; its underlying dictionary data credits
+[en-es-en-Dic](https://github.com/mananoreboton/en-es-en-Dic), which is
+Apache-2.0 licensed. The upstream [license](../data/LICENSE) accompanies
+the generated data. This optional dictionary is a raw vocabulary conversion,
+not a curated or verified translation model.
+
 ## Show build progress
 
 `-p` and `--progress` show preparation, embedding progress, saving, and
