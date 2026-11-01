@@ -17,24 +17,23 @@ is responsible for any filtering, grouping, disambiguation, or final selection.
 
 ## Quick start
 
-Build a map from a tab-separated ID/text association, then search it:
+Build a map from a JSON array of ID/text associations, then search it:
 
 ```sh
-printf 'find\tfind files by name\n' | embdex build commands.bin
+printf '[{"id":"find","text":"find files by name"}]\n' | embdex build commands.bin
 embdex search commands.bin "find files by name"
 ```
 
-Search prints the association ID, score, and original text as tab-separated
-fields. The map can be reused for later queries.
+Search prints a JSON array of ranked associations with ID, score, and text. The map can be reused for later queries.
 
-For larger collections, provide a TSV file and optional dictionaries:
+For larger collections, provide a JSON file and optional dictionaries:
 
 ```sh
-embdex build commands.bin -i corpus.tsv -d dictionary.tsv --progress
+embdex build commands.bin -i corpus.json -d dictionary.json --progress
 embdex search commands.bin "search for a file" --limit 10
 ```
 
-A dictionary contains source-word/replacement-word pairs and is compiled
+A dictionary contains JSON source/target string pairs and is compiled
 into the map. `--progress` shows build stages and embedding completion on
 standard error; without it, building is silent.
 
