@@ -348,10 +348,10 @@ static size_t kc_embdex_variant_choice(const kc_embdex_variant_plan_t *plan,
 }
 
 /**
- * Append normalized substitution pairs from one independent TSV file.
+ * Append normalized substitution pairs from one JSON dictionary array.
  * File order determines the first translation for repeated source terms.
  * @param index Writable dictionary destination.
- * @param path Input TSV file.
+ * @param path Input JSON file.
  * @param capacity Current allocated mapping capacity.
  * @return KC_EMBDEX_OK or an input/memory error.
  */
