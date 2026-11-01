@@ -40,9 +40,12 @@ not an orchestration graph or an array of grouped paths.
 
 ## Acceptance and ranking
 
-The engine otherwise first decides whether the evidence is sufficient,
-then ranks accepted associations. BM25 supplies discovery order; a BM25
-hit alone cannot turn an unrelated association into an accepted result.
+The engine ranks every discovered association, including candidates
+whose evidence does not meet the strong-acceptance criteria. Those criteria
+remain available for diagnostics; they do not truncate the returned
+candidate set. BM25 supplies discovery order, while the lexical and
+semantic evidence determine the final ranking. The requested result
+limit is applied after ranking.
 
 Lexical coverage is weighted by the rarity of the original normalized
 query words. Terms absent from the index are assigned singleton rarity
@@ -51,7 +54,7 @@ the document frequency of the original term, and repeated evidence
 for one query position is counted once.
 
 A complete phrase, strong multi-term lexical coverage or independently
-strong semantic similarity can justify acceptance. Additionally, an
+strong semantic similarity can justify a strong-acceptance diagnostic. Additionally, an
 unambiguous spelling correction supported by exact terms can qualify
 without relying on semantic inference, and a candidate close to the
 top semantic rank can qualify when corroborated by lexical evidence.
