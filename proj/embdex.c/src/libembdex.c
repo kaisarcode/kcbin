@@ -2981,8 +2981,12 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                         }
                     }
                 } else {
+                    /*
+                     * HNSW discovers neighbors; acceptance thresholds must
+                     * not discard them before the final ranking.
+                     */
                     int result = kc_hnsw_search(index->graph,
-                        embedding, window, semantic_floor,
+                        embedding, window, -1.0,
                         &semantic, &semantic_count);
 
                     if (result != KC_HNSW_OK) {
@@ -3016,7 +3020,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                         {
                             item->semantic = semantic[i].score;
                             item->semantic_measured = 1;
-                            item->semantic_found = 1;
+                            item->semantic_found =
+                                semantic[i].score >= semantic_floor;
                             item->semantic_threshold = candidate_floor;
                             item->semantic_variant = variant;
                         }
