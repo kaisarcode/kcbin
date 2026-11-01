@@ -2337,6 +2337,100 @@ static double kc_embdex_score(const kc_embdex_evidence_t *item,
 }
 
 /**
+ * Match a complete UTF-8 term within an arbitrary document without relying
+ * on BM25 tokens. This handles symbol-only queries and dictionary targets.
+ */
+static int kc_embdex_contains_term(const char *document, const char *term)
+{
+    size_t size = strlen(document), length = strlen(term);
+    const char *p;
+
+    if (length == 0) return 0;
+    p = document;
+    while ((p = strstr(p, term)) != NULL) {
+        size_t offset = (size_t)(p - document);
+
+        if (kc_embdex_term_boundary(document, size, offset, length))
+            return 1;
+        p++;
+    }
+    return 0;
+}
+
+/**
+ * For queries with no BM25 tokens, retain exact literal discovery over
+ * source strings and their dictionary-substituted equivalents.
+ */
+static int kc_embdex_search_untokenized(const kc_embdex_t *index,
+    const char *query, size_t limit,
+    kc_embdex_result_fn callback, void *userdata)
+{
+    kc_embdex_rank_t *ranks;
+    char *translated_query = NULL;
+    size_t count = 0;
+    int status;
+
+    if (index->count > SIZE_MAX / sizeof(*ranks))
+        return KC_EMBDEX_ENOMEM;
+    ranks = (kc_embdex_rank_t *)malloc(index->count * sizeof(*ranks));
+    if (ranks == NULL) return KC_EMBDEX_ENOMEM;
+    status = kc_embdex_transform_text(index, query, 0,
+        NULL, &translated_query);
+    if (status != KC_EMBDEX_OK) {
+        free(ranks);
+        return status;
+    }
+    for (size_t i = 0; i < index->count; i++) {
+        const char *content = index->records[i].content;
+        char *translated_content = NULL;
+        double score = 0;
+
+        if (strcmp(content, query) == 0) score = 8.0;
+        else if (kc_embdex_contains_term(content, query))
+            score = 6.0;
+        if (strcmp(translated_query, query) != 0) {
+            if (strcmp(content, translated_query) == 0) {
+                if (score < 7.0) score = 7.0;
+            } else if (kc_embdex_contains_term(content,
+                translated_query) && score < 5.0) score = 5.0;
+        }
+        if (index->word_count != 0) {
+            status = kc_embdex_transform_text(index, content,
+                0, NULL, &translated_content);
+            if (status != KC_EMBDEX_OK) {
+                free(translated_query);
+                free(ranks);
+                return status;
+            }
+            if (strcmp(translated_content, translated_query) == 0) {
+                if (score < 7.0) score = 7.0;
+            } else if (kc_embdex_contains_term(translated_content,
+                translated_query) && score < 5.0) score = 5.0;
+            free(translated_content);
+        }
+        if (score != 0) {
+            ranks[count].ordinal = i;
+            ranks[count++].score = score;
+        }
+    }
+    qsort(ranks, count, sizeof(*ranks), kc_embdex_rank_compare);
+    if (count > limit) count = limit;
+    for (size_t i = 0; i < count; i++) {
+        size_t ordinal = ranks[i].ordinal;
+        kc_embdex_result_t result = {
+            index->records[ordinal].id,
+            index->records[ordinal].content,
+            ranks[i].score
+        };
+
+        if (callback(&result, userdata) != 0) break;
+    }
+    free(translated_query);
+    free(ranks);
+    return KC_EMBDEX_OK;
+}
+
+/**
  * Find relevant associations from independent lexical and semantic evidence.
  * Query coverage, phrase matching and edit-distance uncertainty influence
  * selection; lexical and semantic candidates are admitted through separate
@@ -2430,7 +2524,11 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
             search_query = symbol_query;
         }
     }
-    if (tokens.count == 0) goto finished;
+    if (tokens.count == 0) {
+        status = kc_embdex_search_untokenized(index, query, limit,
+            callback, userdata);
+        goto finished;
+    }
     joined = kc_embdex_join(&tokens);
     if (joined == NULL) {
         status = KC_EMBDEX_ENOMEM;
