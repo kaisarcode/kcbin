@@ -3096,6 +3096,24 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     }
 
     qsort(ranks, rank_count, sizeof(*ranks), kc_embdex_rank_compare);
+    /*
+     * Each association remains eligible, but repeated IDs must not
+     * monopolize a bounded candidate list. Discount lower-ranked
+     * associations of the same ID, then order by the adjusted scores.
+     */
+    for (size_t i = 0; i < rank_count; i++) {
+        const char *id = index->records[ranks[i].ordinal].id;
+        size_t earlier = 0;
+
+        for (size_t j = 0; j < i; j++)
+            if (strcmp(id, index->records[ranks[j].ordinal].id) == 0)
+                earlier++;
+        if (earlier != 0) {
+            ranks[i].score /= (double)(earlier + 1);
+            evidence[ranks[i].ordinal].score = ranks[i].score;
+        }
+    }
+    qsort(ranks, rank_count, sizeof(*ranks), kc_embdex_rank_compare);
     for (size_t i = 0; i < rank_count; i++)
         evidence[ranks[i].ordinal].final_rank = i + 1;
     if (rank_count > limit) rank_count = limit;
