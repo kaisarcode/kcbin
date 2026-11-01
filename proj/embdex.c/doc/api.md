@@ -55,11 +55,12 @@ times until `kc_embdex_close()` is called. Close also accepts NULL.
 files and optional progress notifications:
 
 ```c
-const char *dictionaries[] = {"spanish.tsv", "regional.tsv"};
+const char *dictionaries[] = {"spanish.json", "regional.json"};
 int status = kc_embdex_build_with_dictionaries(
     "commands.bin", documents, count, dictionaries, 2, NULL);
 ```
 
+Each dictionary is a JSON array of source/target string pairs.
 Dictionary files must exist while building. They are merged into the
 binary, so opening and searching requires only the resulting map.
 Pass NULL and zero for the dictionary array and count to build without
