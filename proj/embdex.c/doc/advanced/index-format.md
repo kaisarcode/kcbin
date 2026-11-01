@@ -52,8 +52,10 @@ dimensions, dictionary structure, and the embedded dictionary fingerprint.
 The fingerprint detects inconsistent dictionary metadata; it is not a
 cryptographic signature.
 
-During development, V1 is the only recognized format. Rebuild maps from
-source associations and dictionaries after any incompatible format change.
+During development, V1 remains the only recognized binary layout. The
+fingerprint now distinguishes term-aware dictionaries from the older
+single-word implementation. Dictionary-bearing maps produced by older
+versions must be rebuilt; dictionary-free V1 maps remain compatible.
 There are no migration readers or backward-compatibility paths.
 
 ## Memory and persistence
