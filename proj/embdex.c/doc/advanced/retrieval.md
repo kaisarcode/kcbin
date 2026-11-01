@@ -44,8 +44,12 @@ The engine ranks every discovered association, including candidates
 whose evidence does not meet the strong-acceptance criteria. Those criteria
 remain available for diagnostics; they do not truncate the returned
 candidate set. BM25 supplies discovery order, while the lexical and
-semantic evidence determine the final ranking. The requested result
-limit is applied after ranking.
+semantic evidence determine the final ranking. HNSW retrieval likewise
+uses an unrestricted similarity threshold so its nearest neighbors are
+available to the ranker even when their similarity is weak. Repeated
+associations with the same ID remain eligible but receive a progressively
+smaller ranking score, preventing one ID from crowding out the candidate
+list. The requested result limit is applied after ranking.
 
 Lexical coverage is weighted by the rarity of the original normalized
 query words. Terms absent from the index are assigned singleton rarity
