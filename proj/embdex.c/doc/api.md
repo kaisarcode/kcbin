@@ -60,7 +60,9 @@ int status = kc_embdex_build_with_dictionaries(
     "commands.bin", documents, count, dictionaries, 2, NULL);
 ```
 
-Each dictionary is a JSON array of source/target string pairs.
+Each dictionary is a JSON array of UTF-8 source/target term pairs. Terms can
+contain multiple words, digits, operators, and Unicode symbols. The longest
+source match takes precedence, with ordered alternatives per source term.
 Dictionary files must exist while building. They are merged into the
 binary, so opening and searching requires only the resulting map.
 Pass NULL and zero for the dictionary array and count to build without
