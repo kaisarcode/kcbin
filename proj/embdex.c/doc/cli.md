@@ -6,45 +6,47 @@ receives a stored embedding. Search reuses that work.
 
 ## Build a map
 
-Each nonempty TSV line contains an association ID, a tab, and its text:
+The input is a JSON array of ID/text associations:
 
-```text
-find	find files by name
-grep	search for text inside files
+```json
+[
+  {"id": "find", "text": "find files by name"},
+  {"id": "grep", "text": "search for text\\ninside files"}
+]
 ```
 
-Save the lines as `corpus.tsv` and build the map:
+Save it as `corpus.json` and build the map:
 
 ```sh
-embdex build commands.bin -i corpus.tsv
+embdex build commands.bin -i corpus.json
 ```
 
-Use standard input instead of a file when convenient:
+Standard input works as well:
 
 ```sh
-printf 'find\tfind files by name\n' | embdex build commands.bin
+printf '[{"id":"find","text":"find files by name"}]\\n' | embdex build commands.bin
 ```
 
-IDs may repeat. The first tab separates the ID from the text; neither
-may be empty. Additional tabs are preserved as part of the text. Embedded
-line breaks and NUL bytes are unsupported in CLI input. Empty lines are
-ignored.
+IDs may repeat, and every association remains independent. Both fields must
+be nonempty JSON strings. Text can contain tabs, quotes, and newlines escaped
+according to JSON syntax. An empty array is permitted.
 
 ## Compile dictionaries
 
-An optional dictionary contains UTF-8 source-word and replacement-word
-pairs, separated by a tab:
+An optional dictionary is a JSON array of source/target string pairs:
 
-```text
-buscar	find
-archivos	files
-fichero	file
+```json
+[
+  {"source": "buscar", "target": "find"},
+  {"source": "archivos", "target": "files"},
+  {"source": "fichero", "target": "file"}
+]
 ```
 
-Save this as `dictionary.tsv`, then build:
+Save this as `dictionary.json`, then build:
 
 ```sh
-embdex build commands.bin -i corpus.tsv -d dictionary.tsv
+embdex build commands.bin -i corpus.json -d dictionary.json
 embdex search commands.bin "buscar archivos"
 ```
 
@@ -55,8 +57,8 @@ remain query alternatives. Exact duplicate pairs are discarded.
 
 Substitutions operate on words, not full-sentence translations. Text
 without a matching dictionary entry is preserved. The compiled map
-contains the merged dictionary and does not need the TSV files at search
-time. Dictionaries are optional.
+contains the merged dictionary and does not need the input files during
+search. Dictionaries are optional.
 
 ## Show build progress
 
@@ -64,7 +66,7 @@ time. Dictionaries are optional.
 completion:
 
 ```sh
-embdex build commands.bin -i corpus.tsv -d dictionary.tsv --progress
+embdex build commands.bin -i corpus.json -d dictionary.json --progress
 ```
 
 Embedding progress reports completed associations and updates the same
@@ -79,16 +81,17 @@ embdex search commands.bin "find files by name"
 embdex search commands.bin "search inside files" --limit 5
 ```
 
-Results are printed in descending score order, one per line:
+Results are a JSON array in descending score order:
 
-```text
-ID	SCORE	CONTENT
+```json
+[
+  {"id": "find", "score": 0.85, "text": "find files by name"}
+]
 ```
 
-These are three tab-separated fields, not a header emitted by the CLI.
-The score ranks associations; it is not a probability or a final intent
-classification. The default limit is 10. `-l` / `--limit` accepts a
-nonnegative integer, and zero suppresses result delivery.
+Scores rank candidates; they are not probabilities or final classifications.
+Queries outside the corpus may still return candidates. The default limit is
+10. `-l` / `--limit` accepts a nonnegative integer; zero returns `[]`.
 
 `-h` / `--help` prints usage, and `-v` / `--version` prints the build
 version. Invalid arguments or failed operations return a nonzero exit
