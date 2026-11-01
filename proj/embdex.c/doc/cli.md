@@ -11,7 +11,7 @@ The input is a JSON array of ID/text associations:
 ```json
 [
   {"id": "find", "text": "find files by name"},
-  {"id": "grep", "text": "search for text\\ninside files"}
+  {"id": "grep", "text": "search for text\ninside files"}
 ]
 ```
 
@@ -24,7 +24,7 @@ embdex build commands.bin -i corpus.json
 Standard input works as well:
 
 ```sh
-printf '[{"id":"find","text":"find files by name"}]\\n' | embdex build commands.bin
+printf '[{"id":"find","text":"find files by name"}]\n' | embdex build commands.bin
 ```
 
 IDs may repeat, and every association remains independent. Both fields must
