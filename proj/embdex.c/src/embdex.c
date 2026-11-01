@@ -307,6 +307,9 @@ finished:
     return result;
 }
 
+/**
+ * Collect JSON search results and retain serialization failures.
+ */
 typedef struct {
     JSON_Array *results;
     int failed;
