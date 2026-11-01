@@ -1,14 +1,19 @@
 # embdex.c - Text association retrieval
 
-`embdex` compiles ID/text associations into portable binary maps and retrieves
-relevant candidates from natural-language queries. Maps contain their own
-indexes and optional word dictionaries, so applications can open and search
-them locally without the original input files, a database, or a server.
+`embdex` is a candidate narrower. It compiles ID/text associations into
+binary maps and reduces a large search space to a ranked subset of candidates
+for each query. Maps contain their own indexes and optional word dictionaries,
+so applications can search them locally without the original input files,
+a database, or a server.
 
-Search checks literal terms and phrases first, then uses spelling correction
+Search checks literal terms and phrases first, then uses approximate matching
 and semantic embeddings when needed. Each association remains independently
-searchable; repeated IDs are allowed. The caller decides how to use the
-ranked results.
+searchable; repeated IDs are allowed.
+
+The returned candidates are not definitive answers. A query outside the corpus
+can still produce results, even when none is correct. Scores express relative
+ranking evidence, not confidence or a probability of correctness. The caller
+is responsible for any filtering, grouping, disambiguation, or final selection.
 
 ## Quick start
 
