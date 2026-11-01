@@ -505,6 +505,18 @@ static int kc_embdex_wordmap_identity(kc_embdex_t *index)
     uint32_t hash = UINT32_C(2166136261);
     int written;
 
+    /* New term matching differs from old word-normalized dictionaries.
+     * Dictionary-free V1 indexes remain readable; dictionary-bearing
+     * indexes compiled by older builds must be rebuilt. */
+    if (index->word_count != 0) {
+        const unsigned char *tag =
+            (const unsigned char *)"embdex-utf8-terms-v2";
+
+        for (; *tag != 0; tag++) {
+            hash ^= *tag;
+            hash *= UINT32_C(16777619);
+        }
+    }
     for (size_t i = 0; i < index->word_count; i++) {
         const unsigned char *parts[2] = {
             (const unsigned char *)index->wordmap[i].source,
