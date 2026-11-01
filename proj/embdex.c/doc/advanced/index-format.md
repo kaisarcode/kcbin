@@ -31,8 +31,8 @@ The map uses one V1 binary format with little-endian integers and a
 The file contains contiguous sections in order: associations and vectors,
 original BM25, optional normalized BM25, and dictionary. The dictionary starts
 with a 32-bit entry count (zero when absent) and uses 32-bit byte lengths
-followed by NUL-terminated source/replacement word pairs. Repeated source
-words retain the ordered alternatives supplied by all input dictionaries,
+followed by NUL-terminated source/replacement UTF-8 term pairs. Repeated source
+terms retain the ordered alternatives supplied by all input dictionaries,
 with exact duplicate pairs discarded. Neither source nor replacement
 is labeled with a language.
 
@@ -44,7 +44,7 @@ the internal identity for every retrieval mechanism.
 Each BM25 section contains analyzer configuration, normalized terms,
 document statistics, and postings. The source and translated BM25 indexes
 share association ordinals but remain independent. They use accent folding.
-The embedded dictionary is loaded into a compact lookup table when
+The embedded dictionary is loaded into a sorted term lookup table when
 the map is opened; none of the original JSON files are needed.
 
 Loaded indexes validate section boundaries, association counts, vector
