@@ -41,6 +41,7 @@ standard error; without it, building is silent.
 
 ## Documentation
 
+- [Preparing data](doc/data-preparation.md) - design, generate, and test corpora and dictionaries for any domain.
 - [CLI](doc/cli.md) - corpus and dictionary input, commands, and progress.
 - [C API](doc/api.md) - build, search, callbacks, and ownership.
 - [Retrieval](doc/advanced/retrieval.md) - candidate discovery and ranking.
