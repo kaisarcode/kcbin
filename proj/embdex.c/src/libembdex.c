@@ -207,6 +207,7 @@ static char *kc_embdex_copy_string(const char *input)
  * Validate UTF-8 independently from the BM25 lexical analyzer.
  * Reject overlong encodings, surrogates, invalid continuations and scalars
  * above U+10FFFF; otherwise preserve every code point without tokenizing.
+ * @return Nonzero when the bytes are valid UTF-8.
  */
 static int kc_embdex_utf8_valid(const char *bytes, size_t length)
 {
@@ -253,6 +254,7 @@ static int kc_embdex_utf8_valid(const char *bytes, size_t length)
 /**
  * Validate and normalize a dictionary source term, independently of BM25.
  * ASCII case folding retains byte offsets; all other UTF-8 is kept literally.
+ * @return KC_EMBDEX_OK or an allocation or lexical error.
  */
 static int kc_embdex_term_normalize(const char *bytes, size_t size,
     char **result)
@@ -1855,6 +1857,7 @@ typedef struct {
 
 /**
  * Verify that one transformed token still occupies one BM25 position.
+ * @return Zero to continue lexical traversal.
  */
 static int kc_embdex_aligned_token_visit(const char *term, void *userdata)
 {
@@ -1871,6 +1874,7 @@ static int kc_embdex_aligned_token_visit(const char *term, void *userdata)
  * Determine whether translated and original query tokens are positionally
  * aligned. Equal token counts alone do not establish correspondence:
  * a multiword source can produce the same number of unrelated target words.
+ * @return KC_EMBDEX_OK or an allocation or lexical error.
  */
 static int kc_embdex_mapped_alignment(const kc_embdex_t *index,
     const kc_embdex_tokens_t *original,
@@ -2699,7 +2703,6 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         mapped_tokens.count == 0 && mapped_query != NULL &&
         strcmp(mapped_query, query) != 0)
     {
-        /* A valid dictionary target can contain nothing BM25 tokenizes. */
         status = kc_embdex_search_untokenized(index, query,
             limit, callback, userdata);
         goto finished;
