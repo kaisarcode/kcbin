@@ -701,8 +701,8 @@ static int kc_test_trace_embeddings(const char *path, size_t count)
 }
 
 /**
- * Confirm that complete literal matches bypass inference even for Top K,
- * and a partially unmatched query still enters the semantic fallback.
+ * Confirm that a complete literal phrase bypasses inference while
+ * a query covered by separate associations still invokes semantics.
  * @return Zero when the fallback gate matches the expected behavior.
  */
 static int kc_test_semantic_fallback(void)
@@ -733,7 +733,7 @@ static int kc_test_semantic_fallback(void)
             failed |= kc_embdex_search(index, "quiero tomar agua",
                 &options, kc_test_composition_receive,
                 &results) != KC_EMBDEX_OK;
-            failed |= kc_test_trace_embeddings(trace_path, 0);
+            failed |= kc_test_trace_embeddings(trace_path, 1);
             remove(trace_path);
             results = (kc_test_composition_t){0};
             if (failed) break;
@@ -756,7 +756,7 @@ static int kc_test_semantic_fallback(void)
     remove(index_path);
     remove(trace_path);
     return kc_test_result("semantic_fallback",
-        "runs NLP only when literal coverage is insufficient", failed);
+        "keeps semantic retrieval for composed literal coverage", failed);
 }
 
 /**
