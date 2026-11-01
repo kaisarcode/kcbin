@@ -393,7 +393,7 @@ static int kc_embdex_wordmap_read_file(kc_embdex_t *index,
         source = json_object_get_string(entry, "source");
         target = json_object_get_string(entry, "target");
         if (source[0] == '\0' || target[0] == '\0' ||
-            index->word_count >= 4096) {
+            index->word_count >= UINT32_MAX) {
             status = KC_EMBDEX_EFORMAT;
             break;
         }
@@ -1094,9 +1094,11 @@ static int kc_embdex_load_wordmap(kc_embdex_t *index)
         return KC_EMBDEX_EFORMAT;
     count = kc_embdex_read_u32(data + offset);
     offset += 4;
-    if (count > 4096) return KC_EMBDEX_EFORMAT;
     if (count == 0) return offset == end ? KC_EMBDEX_OK :
         KC_EMBDEX_EFORMAT;
+    if ((uint64_t)count > (uint64_t)SIZE_MAX / sizeof(*index->wordmap) ||
+        (uint64_t)count > (uint64_t)(end - offset) / 12)
+        return KC_EMBDEX_EFORMAT;
     index->wordmap = (kc_embdex_word_t *)calloc(count,
         sizeof(*index->wordmap));
     if (index->wordmap == NULL) return KC_EMBDEX_ENOMEM;
