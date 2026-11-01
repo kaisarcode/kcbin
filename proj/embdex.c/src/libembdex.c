@@ -30,7 +30,6 @@
 #define KC_EMBDEX_HEADER_SIZE 104U
 #define KC_EMBDEX_FORMAT_VERSION 1U
 #define KC_EMBDEX_MODEL_SIZE 32U
-#define KC_EMBDEX_EXACT_LIMIT 256U
 #define KC_EMBDEX_QUERY_TOKENS 64U
 #define KC_EMBDEX_FUZZY_CHOICES 8U
 #define KC_EMBDEX_COVER_PATHS 2U
@@ -856,63 +855,6 @@ static kc_embdex_t *kc_embdex_allocate(size_t count)
 }
 
 /**
- * Add vectors to a new HNSW graph using unique positional identifiers.
- * @param index Index with validated record references and dimensions.
- * @return KC_EMBDEX_OK or a negative status code.
- */
-static int kc_embdex_prepare_graph(kc_embdex_t *index)
-{
-    kc_hnsw_options_t options = {0};
-    float *decoded = NULL;
-    int status = KC_EMBDEX_EINDEX;
-
-    options.dimension = index->dimension;
-    if (kc_hnsw_open(&index->graph, &options) != KC_HNSW_OK) {
-        return KC_EMBDEX_EINDEX;
-    }
-    if (index->mapping != NULL && index->count > 0) {
-        if (index->dimension > SIZE_MAX / sizeof(float)) {
-            return KC_EMBDEX_EFORMAT;
-        }
-        decoded = (float *)malloc(index->dimension * sizeof(float));
-        if (decoded == NULL) {
-            return KC_EMBDEX_ENOMEM;
-        }
-    }
-
-    for (size_t i = 0; i < index->count; i++) {
-        char key[32];
-        const float *vector = index->records[i].owned_vector;
-
-        if (snprintf(key, sizeof(key), "%zu", i) < 0) {
-            goto finished;
-        }
-        if (index->mapping != NULL) {
-            for (size_t j = 0; j < index->dimension; j++) {
-                decoded[j] = kc_embdex_read_float(
-                    index->records[i].encoded + j * sizeof(float)
-                );
-                if (!isfinite(decoded[j])) {
-                    status = KC_EMBDEX_EFORMAT;
-                    goto finished;
-                }
-            }
-            vector = decoded;
-        }
-        if (kc_hnsw_add(index->graph, key, vector) != KC_HNSW_OK) {
-            goto finished;
-        }
-    }
-    if (kc_hnsw_build(index->graph) == KC_HNSW_OK) {
-        status = KC_EMBDEX_OK;
-    }
-
-finished:
-    free(decoded);
-    return status;
-}
-
-/**
  * Construct the independent lexical index over the same ordered associations.
  * @param index Index with owned or mapped document strings.
  * @return KC_EMBDEX_OK or an appropriate negative status.
@@ -1132,7 +1074,7 @@ static int kc_embdex_load_records(kc_embdex_t *index)
     }
     index->dimension = kc_embdex_read_u32(data + 12);
     count = kc_embdex_read_u64(data + 16);
-    if (index->dimension == 0 || index->dimension != kc_emb_dimension() ||
+    if (index->dimension == 0 ||
         index->dimension > SIZE_MAX / sizeof(float) ||
         count > SIZE_MAX / sizeof(kc_embdex_record_t)) {
         return KC_EMBDEX_EFORMAT;
@@ -1263,7 +1205,7 @@ static int kc_embdex_load_wordmap(kc_embdex_t *index)
 }
 
 /**
- * Open a binary semantic index and reconstruct its in-memory graph.
+ * Open a binary semantic index without rebuilding the vector graph.
  * @param out Receives the opened index.
  * @param path Index file path.
  * @return KC_EMBDEX_OK or a negative status code.
@@ -1339,8 +1281,6 @@ int kc_embdex_open(kc_embdex_t **out, const char *path)
                 KC_EMBDEX_MODEL_SIZE) != 0))
             status = KC_EMBDEX_EFORMAT;
     }
-    if (status == KC_EMBDEX_OK && index->count > KC_EMBDEX_EXACT_LIMIT)
-        status = kc_embdex_prepare_graph(index);
     if (status != KC_EMBDEX_OK) {
         kc_embdex_close(index);
         return status;
