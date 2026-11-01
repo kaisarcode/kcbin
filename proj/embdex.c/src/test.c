@@ -724,7 +724,7 @@ static int kc_test_cli(void)
     if (file == NULL) failed = 1;
     else {
         failed |= fputs(
-            "shared\tauthentication for remote peers\n", file) == EOF;
+            "shared\tauthentication\tfor remote peers\n", file) == EOF;
         failed |= fputs(
             "other\tgardening and watering plants\n", file) == EOF;
         failed |= fclose(file) != 0;
@@ -752,7 +752,7 @@ static int kc_test_cli(void)
         while (fgets(line, sizeof(line), file) != NULL)
             found |= strstr(line,
                 "shared\t") == line &&
-                strstr(line, "authentication for remote peers") != NULL;
+                strstr(line, "authentication\tfor remote peers") != NULL;
         failed |= ferror(file) != 0;
         failed |= fclose(file) != 0;
     }
