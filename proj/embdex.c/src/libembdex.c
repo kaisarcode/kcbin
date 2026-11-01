@@ -2864,16 +2864,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     }
 
     if (!tokens.truncated)
-        literal_sufficient = kc_embdex_cover_rank(
-            evidence, index->count, tokens.count);
-    if (!tokens.truncated && !mapped_tokens.truncated &&
-        mapped_tokens.count > 0)
-    {
-        for (size_t i = 0; i < index->count; i++)
-            if (kc_embdex_popcount(evidence[i].mapped_hits) ==
-                mapped_tokens.count)
-                literal_sufficient = 1;
-    }
+        kc_embdex_cover_rank(evidence, index->count, tokens.count);
 
     status = kc_embdex_variant_count(index, query, &variant_plan);
     if (status != KC_EMBDEX_OK) goto finished;
@@ -2896,6 +2887,10 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
             variant_scores[i] = NAN;
     }
     {
+        /*
+         * Covering a query with separate associations does not prove that
+         * retrieval is complete. Only a whole-phrase match skips inference.
+         */
         if (!tokens.truncated) {
             for (size_t i = 0; i < index->count; i++)
                 if (evidence[i].full_phrase ||
