@@ -45,7 +45,7 @@ Each BM25 section contains analyzer configuration, normalized terms,
 document statistics, and postings. The source and translated BM25 indexes
 share association ordinals but remain independent. They use accent folding.
 The embedded dictionary is loaded into a compact lookup table when
-the map is opened; none of the original TSV files are needed.
+the map is opened; none of the original JSON files are needed.
 
 Loaded indexes validate section boundaries, association counts, vector
 dimensions, dictionary structure, and the embedded dictionary fingerprint.
