@@ -172,7 +172,7 @@ static int embdex_parse_records(
         }
         tab = strchr(line, '\t');
         if (tab == NULL || tab == line ||
-            tab[1] == '\0' || strchr(tab + 1, '\t') != NULL) {
+            tab[1] == '\0') {
             free(documents);
             return 1;
         }
