@@ -504,8 +504,8 @@ static int kc_test_wordmap(void)
         {"secret", "guardar contraseñas privadas"},
         {"garden", "cuidar plantas en el jardín"}
     };
-    const char *dictionary_a = "embdex-test-dict-a.tsv";
-    const char *dictionary_b = "embdex-test-dict-b.tsv";
+    const char *dictionary_a = "embdex-test-dict-a.json";
+    const char *dictionary_b = "embdex-test-dict-b.json";
     const char *dictionaries[] = { dictionary_a, dictionary_b };
     const char *path = "embdex-test-wordmap.bin";
     kc_embdex_t *index = NULL;
@@ -517,16 +517,16 @@ static int kc_test_wordmap(void)
     file = fopen(dictionary_a, "w");
     if (file == NULL) failed = 1;
     else {
-        failed |= fputs("guardar\tstore\n", file) == EOF;
-        failed |= fputs("contraseñas\tpasswords\n", file) == EOF;
+        failed |= fputs("{\"source\":\"guardar\",\"target\":\"store\"}]", file) == EOF;
+        failed |= fputs("{\"source\":\"contraseñas\",\"target\":\"passwords\"}]", file) == EOF;
         failed |= fclose(file) != 0;
     }
     file = fopen(dictionary_b, "w");
     if (file == NULL) failed = 1;
     else {
-        failed |= fputs("claves\tpasswords\n", file) == EOF;
-        failed |= fputs("claves\tkeys\n", file) == EOF;
-        failed |= fputs("guardar\tstore\n", file) == EOF;
+        failed |= fputs("[{\"source\":\"claves\",\"target\":\"passwords\"},", file) == EOF;
+        failed |= fputs("{\"source\":\"claves\",\"target\":\"keys\"},", file) == EOF;
+        failed |= fputs("[{\"source\":\"guardar\",\"target\":\"store\"},", file) == EOF;
         failed |= fclose(file) != 0;
     }
     if (!failed)
@@ -711,27 +711,27 @@ static int kc_test_cli_info(void)
 }
 
 /**
- * Build and search through the TSV command-line interface.
- * @return Zero when output contains the expected indexed association.
+ * Build and search through JSON corpus, dictionary and result interfaces.
+ * @return Zero when JSON input and output preserve association text.
  */
 static int kc_test_cli(void)
 {
     FILE *file;
-    char line[512];
+    char line[1024];
     int failed = 0, found = 0;
 
-    file = fopen("embdex-cli-input.tsv", "w");
+    file = fopen("embdex-cli-input.json", "w");
     if (file == NULL) failed = 1;
     else {
         failed |= fputs(
-            "shared\tauthentication\tfor remote peers\n", file) == EOF;
-        failed |= fputs(
-            "other\tgardening and watering plants\n", file) == EOF;
+            "[{\\"id\\":\\"shared\\",\\"text\\":\\"authentication\\\\tfor\\\\nremote peers\\"},"
+            "{\\"id\\":\\"other\\",\\"text\\":\\"gardening and watering plants\\"}]",
+            file) == EOF;
         failed |= fclose(file) != 0;
     }
     if (!failed) failed |= system(
         KC_TEST_CLI " build embdex-cli-index.bin "
-        "-i embdex-cli-input.tsv > embdex-cli-silent.txt 2>&1"
+        "-i embdex-cli-input.json > embdex-cli-silent.txt 2>&1"
     ) != 0;
     if (!failed) {
         file = fopen("embdex-cli-silent.txt", "r");
@@ -744,15 +744,15 @@ static int kc_test_cli(void)
     remove("embdex-cli-silent.txt");
     if (!failed) failed |= system(
         KC_TEST_CLI " search embdex-cli-index.bin authentication "
-        "--limit 2 > embdex-cli-output.tsv 2>&1"
+        "--limit 2 > embdex-cli-output.json 2>&1"
     ) != 0;
-    file = fopen("embdex-cli-output.tsv", "r");
+    file = fopen("embdex-cli-output.json", "r");
     if (file == NULL) failed = 1;
     else {
         while (fgets(line, sizeof(line), file) != NULL)
-            found |= strstr(line,
-                "shared\t") == line &&
-                strstr(line, "authentication\tfor remote peers") != NULL;
+            found |= strstr(line, "\\"id\\":\\"shared\\"") != NULL &&
+                strstr(line, "authentication\\\\tfor\\\\nremote peers") != NULL &&
+                strstr(line, "\\"score\\":") != NULL;
         failed |= ferror(file) != 0;
         failed |= fclose(file) != 0;
     }
@@ -761,22 +761,26 @@ static int kc_test_cli(void)
         KC_TEST_CLI " search embdex-cli-index.bin authentication "
         "--mode hybrid > " KC_TEST_NULL " 2>&1"
     ) == 0;
-    file = fopen("embdex-cli-dict-a.tsv", "w");
+    file = fopen("embdex-cli-dict-a.json", "w");
     if (file == NULL) failed = 1;
     else {
-        failed |= fputs("authentication\tverification\n", file) == EOF;
+        failed |= fputs(
+            "[{\\"source\\":\\"authentication\\",\\"target\\":\\"verification\\"}]",
+            file) == EOF;
         failed |= fclose(file) != 0;
     }
-    file = fopen("embdex-cli-dict-b.tsv", "w");
+    file = fopen("embdex-cli-dict-b.json", "w");
     if (file == NULL) failed = 1;
     else {
-        failed |= fputs("remote\tdistant\n", file) == EOF;
+        failed |= fputs(
+            "[{\\"source\\":\\"remote\\",\\"target\\":\\"distant\\"}]",
+            file) == EOF;
         failed |= fclose(file) != 0;
     }
     if (!failed) failed |= system(
         KC_TEST_CLI " build embdex-cli-index.bin "
-        "-i embdex-cli-input.tsv -d embdex-cli-dict-a.tsv "
-        "--dictionary embdex-cli-dict-b.tsv --progress "
+        "-i embdex-cli-input.json -d embdex-cli-dict-a.json "
+        "--dictionary embdex-cli-dict-b.json --progress "
         "> " KC_TEST_NULL " 2> embdex-cli-progress.txt"
     ) != 0;
     if (!failed) {
@@ -787,15 +791,15 @@ static int kc_test_cli(void)
         if (file == NULL) failed = 1;
         else {
             while (fgets(line, sizeof(line), file) != NULL) {
-                prepare |= strcmp(line, "embdex: preparing\n") == 0;
+                prepare |= strcmp(line, "embdex: preparing\\n") == 0;
                 embed_start |= strstr(line,
-                    "\rembdex: embeddings 0% (0/2)") != NULL;
+                    "\\rembdex: embeddings 0% (0/2)") != NULL;
                 embed_middle |= strstr(line,
-                    "\rembdex: embeddings 50% (1/2)") != NULL;
+                    "\\rembdex: embeddings 50% (1/2)") != NULL;
                 embed_end |= strstr(line,
-                    "\rembdex: embeddings 100% (2/2)") != NULL;
-                save |= strcmp(line, "embdex: saving\n") == 0;
-                done |= strcmp(line, "embdex: done\n") == 0;
+                    "\\rembdex: embeddings 100% (2/2)") != NULL;
+                save |= strcmp(line, "embdex: saving\\n") == 0;
+                done |= strcmp(line, "embdex: done\\n") == 0;
             }
             failed |= ferror(file) != 0;
             failed |= fclose(file) != 0;
@@ -804,28 +808,28 @@ static int kc_test_cli(void)
         }
     }
     remove("embdex-cli-progress.txt");
-    remove("embdex-cli-dict-a.tsv");
-    remove("embdex-cli-dict-b.tsv");
+    remove("embdex-cli-dict-a.json");
+    remove("embdex-cli-dict-b.json");
     if (!failed) failed |= system(
         KC_TEST_CLI " search embdex-cli-index.bin "
-        "\"verification distant peers\" --limit 2 "
-        "> embdex-cli-output.tsv 2>&1"
+        "\\"verification distant peers\\" --limit 2 "
+        "> embdex-cli-output.json 2>&1"
     ) != 0;
     found = 0;
-    file = fopen("embdex-cli-output.tsv", "r");
+    file = fopen("embdex-cli-output.json", "r");
     if (file == NULL) failed = 1;
     else {
         while (fgets(line, sizeof(line), file) != NULL)
-            found |= strstr(line, "shared\t") == line;
+            found |= strstr(line, "\\"id\\":\\"shared\\"") != NULL;
         failed |= ferror(file) != 0;
         failed |= fclose(file) != 0;
     }
     failed |= !found;
-    remove("embdex-cli-input.tsv");
+    remove("embdex-cli-input.json");
     remove("embdex-cli-index.bin");
-    remove("embdex-cli-output.tsv");
+    remove("embdex-cli-output.json");
     return kc_test_result("cli",
-        "builds, merges dictionary TSVs and searches compiled maps", failed);
+        "builds JSON corpus, merges dictionaries and returns JSON", failed);
 }
 #endif
 
