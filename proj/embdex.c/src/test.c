@@ -590,7 +590,8 @@ static int kc_test_terms(void)
         {"cpp", "C plus plus"},
         {"coffee", "coffee"},
         {"arrows", "⇄"},
-        {"mixed", "report unsubscribe backlog"}
+        {"mixed", "report unsubscribe backlog"},
+        {"single_c", "C"}
     };
     const struct {
         const char *query;
@@ -604,7 +605,8 @@ static int kc_test_terms(void)
         {"café", "coffee"},
         {"↔", "arrows"},
         {"⇄", "arrows"},
-        {"dar de baja report", "mixed"}
+        {"dar de baja report", "mixed"},
+        {"flecha", "arrows"}
     };
     const char *dictionary = "embdex-test-terms.json";
     const char *path = "embdex-test-terms.bin";
@@ -627,12 +629,13 @@ static int kc_test_terms(void)
             "{\"source\":\"404\",\"target\":\"not found\"},"
             "{\"source\":\"C++\",\"target\":\"C plus plus\"},"
             "{\"source\":\"café\",\"target\":\"coffee\"},"
-            "{\"source\":\"↔\",\"target\":\"⇄\"}]",
+            "{\"source\":\"↔\",\"target\":\"⇄\"},"
+            "{\"source\":\"flecha\",\"target\":\"⇄\"}]",
             file) == EOF;
         failed |= fclose(file) != 0;
     }
     if (!failed)
-        failed |= kc_embdex_build_with_dictionaries(path, documents, 9,
+        failed |= kc_embdex_build_with_dictionaries(path, documents, 10,
             paths, 1, NULL) != KC_EMBDEX_OK;
     remove(dictionary);
     if (!failed)
