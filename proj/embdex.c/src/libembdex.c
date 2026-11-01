@@ -2305,19 +2305,23 @@ static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
         fprintf(file, ",\"exact\":\"%016" PRIx64
             "\",\"fuzzy\":\"%016" PRIx64
             "\",\"mapped\":\"%016" PRIx64
+            "\",\"mapped_hits\":\"%016" PRIx64
             "\",\"phrase\":\"%016" PRIx64
             "\",\"longest\":%zu,\"bm25_rank\":%zu,"
             "\"mapped_bm25_rank\":%zu",
-            item->exact, item->fuzzy, item->mapped, item->phrase,
+            item->exact, item->fuzzy, item->mapped, item->mapped_hits,
+            item->phrase,
             item->longest, item->lexical_rank, item->mapped_rank);
         fputs(",\"cosine\":", file);
         if (item->semantic_measured)
             fprintf(file, "%.9g", item->semantic);
         else fputs("null", file);
-        fprintf(file, ",\"coverage\":%.9g,\"precision\":%.9g,"
-            "\"full_phrase\":%s,\"accepted\":%s,\"score\":",
-            item->coverage, item->precision,
+        fprintf(file, ",\"coverage\":%.9g,\"mapped_coverage\":%.9g,"
+            "\"precision\":%.9g,\"full_phrase\":%s,"
+            "\"mapped_full_phrase\":%s,\"accepted\":%s,\"score\":",
+            item->coverage, item->mapped_coverage, item->precision,
             item->full_phrase ? "true" : "false",
+            item->mapped_full_phrase ? "true" : "false",
             item->accepted ? "true" : "false");
         if (item->accepted) fprintf(file, "%.9g", item->score);
         else fputs("null", file);
