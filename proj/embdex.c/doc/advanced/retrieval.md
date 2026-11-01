@@ -65,17 +65,14 @@ of the corpus, and no search mode is exposed.
 
 ## Semantic fallback
 
-Semantic inference is a fallback after literal retrieval. When the query
-is fully covered by a literal phrase or a complete contiguous segmentation
-of indexed associations, search ranks the lexical candidates without
-calling `libemb`. This applies regardless of the requested result limit.
-Literal matches from the compiled dictionary-normalized index also count
-toward complete coverage. Incomplete coverage, including a query with
-unmatched words, triggers semantic inference and ranking.
+Semantic inference is a fallback after literal retrieval. A complete
+contiguous phrase match in the original or dictionary-normalized text
+can skip `libemb`, regardless of the requested result limit. Covering
+the query with several independent associations does not stop semantic
+retrieval: those matches may explain individual terms without finding
+other relevant associations. The covering still contributes to ranking.
 
-The fallback rule measures coverage rather than trying to understand
-the query. A full set of literal associations may still be ambiguous;
-`embdex` returns ranked candidates for the caller to interpret. Truncated
+A query with unmatched words also triggers semantic inference. Truncated
 lexical queries conservatively continue to semantic inference. The
 diagnostic trace reports `variants_evaluated: 0` when embeddings were
 skipped and a positive count when inference ran.
@@ -110,8 +107,9 @@ only when the original and transformed tokens can be verified to align.
 Complete original and translated phrase matches preserve UTF-8 punctuation,
 including operators such as C++. A translated target made entirely of
 symbols remains searchable through literal matching even when BM25 yields
-no tokens. Complete translated lexical coverage can narrow candidates
-without requiring semantic inference.
+no tokens. Translated lexical coverage contributes to candidate ranking, but
+does not by itself suppress semantic retrieval unless a complete
+translated phrase is matched.
 
 ## Diagnostics
 
