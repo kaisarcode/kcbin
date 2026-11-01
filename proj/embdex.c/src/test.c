@@ -517,16 +517,20 @@ static int kc_test_wordmap(void)
     file = fopen(dictionary_a, "w");
     if (file == NULL) failed = 1;
     else {
-        failed |= fputs("{\"source\":\"guardar\",\"target\":\"store\"}]", file) == EOF;
-        failed |= fputs("{\"source\":\"contraseñas\",\"target\":\"passwords\"}]", file) == EOF;
+        failed |= fputs(
+            "[{\"source\":\"guardar\",\"target\":\"store\"},"
+            "{\"source\":\"contraseñas\",\"target\":\"passwords\"}]",
+            file) == EOF;
         failed |= fclose(file) != 0;
     }
     file = fopen(dictionary_b, "w");
     if (file == NULL) failed = 1;
     else {
-        failed |= fputs("[{\"source\":\"claves\",\"target\":\"passwords\"},", file) == EOF;
-        failed |= fputs("{\"source\":\"claves\",\"target\":\"keys\"},", file) == EOF;
-        failed |= fputs("[{\"source\":\"guardar\",\"target\":\"store\"},", file) == EOF;
+        failed |= fputs(
+            "[{\"source\":\"claves\",\"target\":\"passwords\"},"
+            "{\"source\":\"claves\",\"target\":\"keys\"},"
+            "{\"source\":\"guardar\",\"target\":\"store\"}]",
+            file) == EOF;
         failed |= fclose(file) != 0;
     }
     if (!failed)
