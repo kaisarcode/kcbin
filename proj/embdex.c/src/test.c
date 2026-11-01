@@ -529,8 +529,13 @@ static int kc_test_wordmap(void)
         failed |= fputs(
             "[{\"source\":\"claves\",\"target\":\"passwords\"},"
             "{\"source\":\"claves\",\"target\":\"keys\"},"
-            "{\"source\":\"guardar\",\"target\":\"store\"}]",
+            "{\"source\":\"guardar\",\"target\":\"store\"},",
             file) == EOF;
+        for (size_t i = 0; i < 4097 && !failed; i++) {
+            failed |= fprintf(file,
+                "{\"source\":\"extra%zu\",\"target\":\"value%zu\"}%s",
+                i, i, i == 4096 ? "]" : ",") < 0;
+        }
         failed |= fclose(file) != 0;
     }
     if (!failed)
