@@ -24,7 +24,8 @@ printf '[{"id":"find","text":"find files by name"}]\n' | embdex build commands.b
 embdex search commands.bin "find files by name"
 ```
 
-Search prints a JSON array of ranked associations with ID, score, and text. The map can be reused for later queries.
+Search prints a JSON array of ranked associations with ID, score, and text.
+The map can be reused for later queries.
 
 For larger collections, provide a JSON file and optional dictionaries:
 
