@@ -724,8 +724,8 @@ static int kc_test_cli(void)
     if (file == NULL) failed = 1;
     else {
         failed |= fputs(
-            "[{\\"id\\":\\"shared\\",\\"text\\":\\"authentication\\\\tfor\\\\nremote peers\\"},"
-            "{\\"id\\":\\"other\\",\\"text\\":\\"gardening and watering plants\\"}]",
+            "[{\"id\":\"shared\",\"text\":\"authentication\\tfor\\nremote peers\"},"
+            "{\"id\":\"other\",\"text\":\"gardening and watering plants\"}]",
             file) == EOF;
         failed |= fclose(file) != 0;
     }
@@ -750,9 +750,9 @@ static int kc_test_cli(void)
     if (file == NULL) failed = 1;
     else {
         while (fgets(line, sizeof(line), file) != NULL)
-            found |= strstr(line, "\\"id\\":\\"shared\\"") != NULL &&
-                strstr(line, "authentication\\\\tfor\\\\nremote peers") != NULL &&
-                strstr(line, "\\"score\\":") != NULL;
+            found |= strstr(line, "\"id\":\"shared\"") != NULL &&
+                strstr(line, "authentication\\tfor\\nremote peers") != NULL &&
+                strstr(line, "\"score\":") != NULL;
         failed |= ferror(file) != 0;
         failed |= fclose(file) != 0;
     }
@@ -765,7 +765,7 @@ static int kc_test_cli(void)
     if (file == NULL) failed = 1;
     else {
         failed |= fputs(
-            "[{\\"source\\":\\"authentication\\",\\"target\\":\\"verification\\"}]",
+            "[{\"source\":\"authentication\",\"target\":\"verification\"}]",
             file) == EOF;
         failed |= fclose(file) != 0;
     }
@@ -773,7 +773,7 @@ static int kc_test_cli(void)
     if (file == NULL) failed = 1;
     else {
         failed |= fputs(
-            "[{\\"source\\":\\"remote\\",\\"target\\":\\"distant\\"}]",
+            "[{\"source\":\"remote\",\"target\":\"distant\"}]",
             file) == EOF;
         failed |= fclose(file) != 0;
     }
@@ -791,15 +791,15 @@ static int kc_test_cli(void)
         if (file == NULL) failed = 1;
         else {
             while (fgets(line, sizeof(line), file) != NULL) {
-                prepare |= strcmp(line, "embdex: preparing\\n") == 0;
+                prepare |= strcmp(line, "embdex: preparing\n") == 0;
                 embed_start |= strstr(line,
-                    "\\rembdex: embeddings 0% (0/2)") != NULL;
+                    "\rembdex: embeddings 0% (0/2)") != NULL;
                 embed_middle |= strstr(line,
-                    "\\rembdex: embeddings 50% (1/2)") != NULL;
+                    "\rembdex: embeddings 50% (1/2)") != NULL;
                 embed_end |= strstr(line,
-                    "\\rembdex: embeddings 100% (2/2)") != NULL;
-                save |= strcmp(line, "embdex: saving\\n") == 0;
-                done |= strcmp(line, "embdex: done\\n") == 0;
+                    "\rembdex: embeddings 100% (2/2)") != NULL;
+                save |= strcmp(line, "embdex: saving\n") == 0;
+                done |= strcmp(line, "embdex: done\n") == 0;
             }
             failed |= ferror(file) != 0;
             failed |= fclose(file) != 0;
@@ -812,7 +812,7 @@ static int kc_test_cli(void)
     remove("embdex-cli-dict-b.json");
     if (!failed) failed |= system(
         KC_TEST_CLI " search embdex-cli-index.bin "
-        "\\"verification distant peers\\" --limit 2 "
+        "\"verification distant peers\" --limit 2 "
         "> embdex-cli-output.json 2>&1"
     ) != 0;
     found = 0;
@@ -820,7 +820,7 @@ static int kc_test_cli(void)
     if (file == NULL) failed = 1;
     else {
         while (fgets(line, sizeof(line), file) != NULL)
-            found |= strstr(line, "\\"id\\":\\"shared\\"") != NULL;
+            found |= strstr(line, "\"id\":\"shared\"") != NULL;
         failed |= ferror(file) != 0;
         failed |= fclose(file) != 0;
     }
