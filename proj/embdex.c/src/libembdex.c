@@ -204,45 +204,68 @@ static char *kc_embdex_copy_string(const char *input)
 }
 
 /**
- * Validate UTF-8 terms without imposing lexical token boundaries.
- * BM25 is used solely as a UTF-8 validator here; punctuation and symbols
- * are retained verbatim in the dictionary key.
- * @return Zero to continue lexical validation.
+ * Validate UTF-8 independently from the BM25 lexical analyzer.
+ * Reject overlong encodings, surrogates, invalid continuations and scalars
+ * above U+10FFFF; otherwise preserve every code point without tokenizing.
  */
-static int kc_embdex_term_ignore(const char *token, void *userdata)
+static int kc_embdex_utf8_valid(const char *bytes, size_t length)
 {
-    (void)token;
-    (void)userdata;
-    return 0;
+    size_t offset = 0;
+
+    while (offset < length) {
+        const unsigned char first = (unsigned char)bytes[offset];
+        uint32_t codepoint;
+        uint32_t minimum;
+        size_t tail;
+
+        if (first <= 0x7fU) {
+            offset++;
+            continue;
+        }
+        if (first >= 0xc2U && first <= 0xdfU) {
+            codepoint = (uint32_t)(first & 0x1fU);
+            minimum = 0x80U;
+            tail = 1;
+        } else if (first >= 0xe0U && first <= 0xefU) {
+            codepoint = (uint32_t)(first & 0x0fU);
+            minimum = 0x800U;
+            tail = 2;
+        } else if (first >= 0xf0U && first <= 0xf4U) {
+            codepoint = (uint32_t)(first & 0x07U);
+            minimum = 0x10000U;
+            tail = 3;
+        } else return 0;
+        if (tail >= length - offset) return 0;
+        for (size_t i = 1; i <= tail; i++) {
+            const unsigned char next = (unsigned char)bytes[offset + i];
+
+            if ((next & 0xc0U) != 0x80U) return 0;
+            codepoint = (codepoint << 6) | (uint32_t)(next & 0x3fU);
+        }
+        if (codepoint < minimum || codepoint > 0x10ffffU ||
+            (codepoint >= 0xd800U && codepoint <= 0xdfffU))
+            return 0;
+        offset += tail + 1;
+    }
+    return 1;
 }
 
 /**
- * Validate and normalize a dictionary term without discarding UTF-8 symbols.
- * @param index Index that provides the lexical validator.
- * @param bytes Term bytes to normalize.
- * @param size Number of bytes in the term.
- * @param result Receives an allocated normalized term.
- * @return KC_EMBDEX_OK or an allocation, lexical, or format error.
+ * Validate and normalize a dictionary source term, independently of BM25.
+ * ASCII case folding retains byte offsets; all other UTF-8 is kept literally.
  */
-static int kc_embdex_term_normalize(const kc_embdex_t *index,
-    const char *bytes, size_t size, char **result)
+static int kc_embdex_term_normalize(const char *bytes, size_t size,
+    char **result)
 {
     char *copy;
-    int status;
 
     *result = NULL;
     if (size == SIZE_MAX) return KC_EMBDEX_ENOMEM;
+    if (!kc_embdex_utf8_valid(bytes, size)) return KC_EMBDEX_ELEXICAL;
     copy = (char *)malloc(size + 1);
     if (copy == NULL) return KC_EMBDEX_ENOMEM;
     memcpy(copy, bytes, size);
     copy[size] = '\0';
-    status = kc_bm25_tokens(index->lexical, copy,
-        kc_embdex_term_ignore, NULL);
-    if (status != KC_BM25_OK) {
-        free(copy);
-        return status == KC_BM25_EUTF8 ?
-            KC_EMBDEX_ELEXICAL : KC_EMBDEX_EFORMAT;
-    }
     for (size_t i = 0; i < size; i++)
         if (copy[i] >= 'A' && copy[i] <= 'Z')
             copy[i] = (char)(copy[i] - 'A' + 'a');
@@ -400,12 +423,12 @@ static int kc_embdex_wordmap_read_file(kc_embdex_t *index,
         {
             char *validated = NULL;
 
-            status = kc_embdex_term_normalize(index, target,
+            status = kc_embdex_term_normalize(target,
                 strlen(target), &validated);
             free(validated);
             if (status != KC_EMBDEX_OK) break;
         }
-        status = kc_embdex_term_normalize(index, source,
+        status = kc_embdex_term_normalize(source,
             strlen(source), &normalized);
         if (status != KC_EMBDEX_OK) break;
         if (index->word_count == *capacity) {
@@ -548,7 +571,7 @@ static int kc_embdex_wordmap_identity(kc_embdex_t *index)
 
 /**
  * Read the UTF-8 code point at a known character boundary.
- * All callers have already validated their input through BM25.
+ * All callers operate on previously validated UTF-8 input.
  * @return UTF-8 code point beginning at the requested byte position.
  */
 static uint32_t kc_embdex_codepoint(const char *text, size_t pos)
@@ -1582,6 +1605,7 @@ typedef struct {
     uint64_t exact;
     uint64_t fuzzy;
     uint64_t mapped;
+    uint64_t mapped_hits;
     uint64_t phrase;
     uint64_t literal_starts;
     uint64_t mapped_starts;
@@ -1601,10 +1625,12 @@ typedef struct {
     size_t variants_evaluated;
     double semantic_threshold;
     int full_phrase;
+    int mapped_full_phrase;
     int accepted;
     size_t final_rank;
     double score;
     double coverage;
+    double mapped_coverage;
     double precision;
     const char *reason;
 } kc_embdex_evidence_t;
@@ -1821,6 +1847,58 @@ static void kc_embdex_tokens_close(kc_embdex_tokens_t *tokens)
     tokens->count = 0;
 }
 
+typedef struct {
+    const char *expected;
+    size_t count;
+    int matched;
+} kc_embdex_aligned_token_t;
+
+/**
+ * Verify that one transformed token still occupies one BM25 position.
+ */
+static int kc_embdex_aligned_token_visit(const char *term, void *userdata)
+{
+    kc_embdex_aligned_token_t *state =
+        (kc_embdex_aligned_token_t *)userdata;
+
+    state->count++;
+    if (state->count == 1 && strcmp(term, state->expected) == 0)
+        state->matched = 1;
+    return 0;
+}
+
+/**
+ * Determine whether translated and original query tokens are positionally
+ * aligned. Equal token counts alone do not establish correspondence:
+ * a multiword source can produce the same number of unrelated target words.
+ */
+static int kc_embdex_mapped_alignment(const kc_embdex_t *index,
+    const kc_embdex_tokens_t *original,
+    const kc_embdex_tokens_t *mapped, int *aligned)
+{
+    *aligned = 0;
+    if (original->truncated || mapped->truncated ||
+        original->count != mapped->count) return KC_EMBDEX_OK;
+
+    for (size_t i = 0; i < original->count; i++) {
+        kc_embdex_aligned_token_t capture = {
+            mapped->value[i], 0, 0
+        };
+        char *replacement = NULL;
+        int status = kc_embdex_transform_text(index, original->value[i],
+            0, NULL, &replacement);
+
+        if (status != KC_EMBDEX_OK) return status;
+        status = kc_bm25_tokens(index->mapped_lexical, replacement,
+            kc_embdex_aligned_token_visit, &capture);
+        free(replacement);
+        if (status != KC_BM25_OK) return KC_EMBDEX_ELEXICAL;
+        if (capture.count != 1 || !capture.matched) return KC_EMBDEX_OK;
+    }
+    *aligned = 1;
+    return KC_EMBDEX_OK;
+}
+
 /**
  * Join normalized query words using unambiguous ASCII word separators.
  * @param tokens Normalized query tokens.
@@ -1933,8 +2011,11 @@ static int kc_embdex_posting_add(size_t ordinal, size_t frequency,
         return 1;
     }
     evidence = &context->evidence[ordinal];
-    if (context->mapped)
-        evidence->mapped |= UINT64_C(1) << context->position;
+    if (context->mapped) {
+        evidence->mapped_hits |= UINT64_C(1) << context->position;
+        if (context->mapped == 1)
+            evidence->mapped |= UINT64_C(1) << context->position;
+    }
     else if (context->fuzzy)
         evidence->fuzzy |= UINT64_C(1) << context->position;
     else
@@ -2319,7 +2400,8 @@ static int kc_embdex_variant_count(const kc_embdex_t *index,
 static const char *kc_embdex_accept(const kc_embdex_evidence_t *item,
     size_t total_query_tokens, size_t exact_count,
     size_t corrected_count, double coverage,
-    double semantic_floor, int truncated)
+    double semantic_floor, int truncated,
+    double mapped_coverage, size_t mapped_count, int mapped_truncated)
 {
     double similarity = item->semantic_found ? item->semantic : 0;
 
@@ -2327,6 +2409,11 @@ static const char *kc_embdex_accept(const kc_embdex_evidence_t *item,
         semantic_floor = item->semantic_threshold;
     if (!truncated && item->full_phrase)
         return "complete_phrase";
+    if (!truncated && !mapped_truncated && item->mapped_full_phrase)
+        return "complete_translated_phrase";
+    if (!truncated && !mapped_truncated && mapped_count != 0 &&
+        mapped_coverage >= 1.0)
+        return "strong_translated_coverage";
     if (!truncated && coverage >= 0.80 &&
         (exact_count + corrected_count >= 2 ||
             (total_query_tokens == 1 &&
@@ -2373,7 +2460,8 @@ static double kc_embdex_score(const kc_embdex_evidence_t *item,
         0.15 * phrase_ratio + 0.10 * bm25 * coverage +
         0.50 * cosine - 0.08 * corrected_weight;
 
-    if (item->full_phrase) score += 0.50;
+    if (item->full_phrase || item->mapped_full_phrase) score += 0.50;
+    score += 0.25 * item->mapped_coverage;
     return score;
 }
 
@@ -2515,6 +2603,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     double weights[KC_EMBDEX_QUERY_TOKENS] = {0};
     double total_weight = 0;
     int literal_sufficient = 0;
+    int mapped_aligned = 0;
     int status = KC_EMBDEX_OK;
 
     if (index == NULL || query == NULL || callback == NULL ||
@@ -2595,12 +2684,13 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
             goto finished;
         }
     }
-    if (index->mapped_lexical != NULL &&
-        mapped_tokens.count == tokens.count && !mapped_tokens.truncated)
-    {
+    if (index->mapped_lexical != NULL) {
+        status = kc_embdex_mapped_alignment(index, &tokens,
+            &mapped_tokens, &mapped_aligned);
+        if (status != KC_EMBDEX_OK) goto finished;
         for (size_t i = 0; i < mapped_tokens.count; i++) {
             kc_embdex_post_context_t post = {
-                evidence, index->count, i, 0, 1, 0, 0
+                evidence, index->count, i, 0, mapped_aligned ? 1 : 2, 0, 0
             };
             int result = kc_bm25_postings(index->mapped_lexical,
                 mapped_tokens.value[i], kc_embdex_posting_add, &post);
@@ -2785,20 +2875,14 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                 goto finished;
             }
             if (normalized.text != NULL) {
-                if (mapped_tokens.count == tokens.count) {
+                if (mapped_aligned)
                     evidence[i].mapped_starts = kc_embdex_literal_starts(
                         &mapped_tokens, normalized.text,
                         &evidence[i].mapped_length);
-                } else if (mapped_joined != NULL &&
+                if (mapped_joined != NULL &&
                     kc_embdex_contains(normalized.text,
                         mapped_joined, strlen(mapped_joined)))
-                {
-                    evidence[i].full_phrase = 1;
-                    evidence[i].mapped = tokens.count == 64 ?
-                        UINT64_MAX :
-                        (UINT64_C(1) << tokens.count) - 1;
-                    evidence[i].longest = tokens.count;
-                }
+                    evidence[i].mapped_full_phrase = 1;
             }
             free(normalized.text);
         }
@@ -2831,7 +2915,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     {
         if (!tokens.truncated) {
             for (size_t i = 0; i < index->count; i++)
-                if (evidence[i].full_phrase)
+                if (evidence[i].full_phrase ||
+                    evidence[i].mapped_full_phrase)
                     literal_sufficient = 1;
         }
         if (tokens.truncated || !literal_sufficient) {
@@ -3000,13 +3085,17 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         precise = total_weight > 0 ?
             (weight_exact + 0.75 * mapped_weight) / total_weight : 0;
         item->coverage = coverage;
+        item->mapped_coverage = mapped_tokens.count != 0 ?
+            (double)kc_embdex_popcount(item->mapped_hits) /
+            (double)mapped_tokens.count : 0;
         item->precision = precise;
         double score;
         const char *reason = item->composition_rank != 0 ?
             "literal_composition" :
             kc_embdex_accept(item, tokens.count,
                 exact, corrected, coverage, semantic_only_floor,
-                tokens.truncated);
+                tokens.truncated, item->mapped_coverage,
+                mapped_tokens.count, mapped_tokens.truncated);
 
         if (reason == NULL) {
             item->reason = mask != 0 || item->lexical_rank != 0 ||
