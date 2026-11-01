@@ -150,6 +150,7 @@ OUT_SHARED = $(OUT_DIR)/libembdex.$(TARGET_EXT)
 OUT_STATIC = $(OUT_DIR)/libembdex.a
 OUT_CLI = $(OUT_DIR)/embdex$(TARGET_CLI_EXT)
 OUT_OBJECT = $(BUILD_DIR)/$(TARGET)/libembdex.o
+PARSON_OBJECT = $(BUILD_DIR)/$(TARGET)/parson.o
 TARGET_PRODUCT = $(if $(filter wasm/%,$(TARGET)),$(OUT_SHARED),$(OUT_CLI))
 
 check-deps:
@@ -172,23 +173,28 @@ build-target: check-deps
 		KCDIST_DIR="$(KCDIST_DIR)" BUILD_VERSION="$(BUILD_VERSION)"
 	@echo "OK $(TARGET)"
 
-$(OUT_OBJECT): src/libembdex.c src/libembdex.h Makefile $(DEP_HEADERS)
+$(OUT_OBJECT): src/libembdex.c src/libembdex.h lib/parson/parson.h Makefile $(DEP_HEADERS)
 	@mkdir -p "$(dir $@)"
 	@$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror $(TARGET_CFLAGS) \
-		-DKC_EMBDEX_BUILD_VERSION=$(BUILD_VERSION) -Isrc $(DEP_INCLUDES) \
+		-DKC_EMBDEX_BUILD_VERSION=$(BUILD_VERSION) -Isrc -Ilib/parson $(DEP_INCLUDES) \
 		-c -o "$@" src/libembdex.c
 
-$(OUT_STATIC): $(OUT_OBJECT)
-	@mkdir -p "$(OUT_DIR)"
-	@$(TARGET_AR) rcs "$@" "$<"
+$(PARSON_OBJECT): lib/parson/parson.c lib/parson/parson.h Makefile
+	@mkdir -p "$(dir $@)"
+	@$(TARGET_CC) -std=c11 -O2 -w $(TARGET_CFLAGS) -Ilib/parson \
+		-c -o "$@" lib/parson/parson.c
 
-$(OUT_SHARED): $(OUT_OBJECT) $(DEP_LIBS)
+$(OUT_STATIC): $(OUT_OBJECT) $(PARSON_OBJECT)
 	@mkdir -p "$(OUT_DIR)"
-	@$(TARGET_CXX) $(TARGET_SHARED) -o "$@" "$(OUT_OBJECT)" $(DEP_LINKS)
+	@$(TARGET_AR) rcs "$@" $(OUT_OBJECT) $(PARSON_OBJECT)
 
-$(OUT_CLI): src/embdex.c src/libembdex.h $(OUT_STATIC) $(OUT_SHARED) $(DEP_LIBS)
+$(OUT_SHARED): $(OUT_OBJECT) $(PARSON_OBJECT) $(DEP_LIBS)
+	@mkdir -p "$(OUT_DIR)"
+	@$(TARGET_CXX) $(TARGET_SHARED) -o "$@" "$(OUT_OBJECT)" "$(PARSON_OBJECT)" $(DEP_LINKS)
+
+$(OUT_CLI): src/embdex.c src/libembdex.h lib/parson/parson.h $(OUT_STATIC) $(OUT_SHARED) $(DEP_LIBS)
 	@mkdir -p "$(BUILD_DIR)/$(TARGET)"
-	@$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
+	@$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc -Ilib/parson \
 		-c -o "$(BUILD_DIR)/$(TARGET)/embdex.o" src/embdex.c
 	@$(TARGET_CXX) -o "$@" "$(BUILD_DIR)/$(TARGET)/embdex.o" \
 		"$(OUT_STATIC)" $(DEP_LINKS)
