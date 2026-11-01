@@ -86,15 +86,17 @@ negative queries; the diagnostic trace is available for that purpose.
 
 ## Dictionary alternatives
 
-Dictionaries provide word-for-word substitutions without assigning language
-identities or grammar rules. The first replacement for a source word is used
-when preparing the stored embeddings and substituted lexical index.
-Additional replacements can produce alternative query texts.
+Dictionaries substitute complete UTF-8 terms, including multiword expressions
+and symbols, without assigning language identities or grammar rules. The
+longest source match takes precedence. The first replacement of a source term
+is used when preparing the stored embeddings and substituted lexical index.
+Additional replacements can produce alternative query texts. Substitutions
+are applied once to the original text, without recursively rewriting output.
 
-Search evaluates at most eight deterministic word-substitution combinations
+Search evaluates at most eight deterministic term-substitution combinations
 when semantic fallback is necessary. It enumerates all combinations if they
 fit within that budget and otherwise distributes selections across ambiguous
-word positions. Duplicate substituted strings are embedded only once.
+term occurrences. Duplicate substituted strings are embedded only once.
 Multiple semantic variants combine the highest cosine similarity with
 reciprocal-ranking agreement.
 
