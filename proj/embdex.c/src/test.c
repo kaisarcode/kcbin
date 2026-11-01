@@ -574,6 +574,80 @@ static int kc_test_wordmap(void)
 }
 
 /**
+ * Confirm that dictionary keys and values are arbitrary UTF-8 terms.
+ * Multiword sources use longest-match substitution; symbols and numbers
+ * remain searchable even when their source contains no lexical token.
+ */
+static int kc_test_terms(void)
+{
+    const kc_embdex_document_t documents[] = {
+        {"unsubscribe", "unsubscribe"},
+        {"give", "give low"},
+        {"arrow", "arrow"},
+        {"rocket", "rocket"},
+        {"notfound", "not found"},
+        {"cpp", "C plus plus"},
+        {"coffee", "coffee"}
+    };
+    const struct {
+        const char *query;
+        const char *id;
+    } examples[] = {
+        {"dar de baja", "unsubscribe"},
+        {"->", "arrow"},
+        {"🚀", "rocket"},
+        {"404", "notfound"},
+        {"C++", "cpp"},
+        {"café", "coffee"}
+    };
+    const char *dictionary = "embdex-test-terms.json";
+    const char *path = "embdex-test-terms.bin";
+    const char *paths[] = { dictionary };
+    kc_embdex_t *index = NULL;
+    FILE *file;
+    int failed = 0;
+
+    remove(dictionary);
+    remove(path);
+    file = fopen(dictionary, "w");
+    if (file == NULL) failed = 1;
+    else {
+        failed |= fputs(
+            "[{\"source\":\"dar\",\"target\":\"give\"},"
+            "{\"source\":\"baja\",\"target\":\"low\"},"
+            "{\"source\":\"dar de baja\",\"target\":\"unsubscribe\"},"
+            "{\"source\":\"->\",\"target\":\"arrow\"},"
+            "{\"source\":\"🚀\",\"target\":\"rocket\"},"
+            "{\"source\":\"404\",\"target\":\"not found\"},"
+            "{\"source\":\"C++\",\"target\":\"C plus plus\"},"
+            "{\"source\":\"café\",\"target\":\"coffee\"}]",
+            file) == EOF;
+        failed |= fclose(file) != 0;
+    }
+    if (!failed)
+        failed |= kc_embdex_build_with_dictionaries(path, documents, 7,
+            paths, 1, NULL) != KC_EMBDEX_OK;
+    remove(dictionary);
+    if (!failed)
+        failed |= kc_embdex_open(&index, path) != KC_EMBDEX_OK;
+    for (size_t i = 0; i < sizeof(examples)/sizeof(examples[0]) &&
+        !failed; i++)
+    {
+        kc_embdex_match_test_t result = {0};
+
+        failed |= kc_embdex_search(index, examples[i].query, NULL,
+            kc_test_match, &result) != KC_EMBDEX_OK;
+        failed |= result.count == 0 ||
+            strcmp(result.first_id, examples[i].id) != 0;
+    }
+    kc_embdex_close(index);
+    remove(path);
+    return kc_test_result("terms",
+        "matches multiword and symbolic UTF-8 dictionary terms",
+        failed);
+}
+
+/**
  * Configure the diagnostic stream only during a test search.
  * @param path Trace file or NULL to disable tracing.
  * @return Zero when the environment was updated.
@@ -860,6 +934,7 @@ static int kc_test_run(const char *name)
     if (strcmp(name, "progress") == 0) return kc_test_progress();
 #ifndef __EMSCRIPTEN__
     if (strcmp(name, "wordmap") == 0) return kc_test_wordmap();
+    if (strcmp(name, "terms") == 0) return kc_test_terms();
     if (strcmp(name, "semantic_fallback") == 0)
         return kc_test_semantic_fallback();
     if (strcmp(name, "cli_info") == 0) return kc_test_cli_info();
@@ -881,7 +956,7 @@ int main(int argc, char **argv)
         "search", "duplicates", "invalid", "format",
         "relevance", "composition", "query", "progress",
 #ifndef __EMSCRIPTEN__
-        "wordmap", "semantic_fallback", "cli_info", "cli",
+        "wordmap", "terms", "semantic_fallback", "cli_info", "cli",
 #endif
     };
     int failed = 0;
