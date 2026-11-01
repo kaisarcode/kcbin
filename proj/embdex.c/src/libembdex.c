@@ -263,44 +263,48 @@ static int kc_embdex_word_compare(const void *a, const void *b)
 }
 
 /**
- * Compare a complete dictionary term with a byte slice.
- * A term may contain any non-NUL UTF-8 sequence.
+ * Compare a dictionary term with a prefix of the current input.
+ * Returns zero when the key contains at least the requested prefix.
  */
-static int kc_embdex_term_compare_slice(const char *term,
-    const char *slice, size_t length)
+static int kc_embdex_term_compare_prefix(const char *term,
+    const char *text, size_t length)
 {
-    size_t term_length = strlen(term);
-    size_t shared = term_length < length ? term_length : length;
-    int order = memcmp(term, slice, shared);
+    for (size_t i = 0; i < length; i++) {
+        unsigned char left = (unsigned char)term[i];
+        unsigned char right = (unsigned char)text[i];
 
-    if (order != 0) return order;
-    return term_length < length ? -1 : term_length > length ? 1 : 0;
+        if (left != right) return left < right ? -1 : 1;
+        if (left == 0) return -1;
+    }
+    return 0;
 }
 
 /**
- * Find all ordered alternatives for a complete term slice.
+ * Narrow a sorted dictionary range to keys sharing an exact prefix.
+ * Prefixes that are absent stop the matcher immediately.
  */
-static size_t kc_embdex_term_find(const kc_embdex_t *index,
-    const char *text, size_t length, size_t *count)
+static void kc_embdex_term_prefix_range(const kc_embdex_t *index,
+    const char *text, size_t length, size_t *start, size_t *end)
 {
-    size_t low = 0, high = index->word_count, first;
+    size_t low = *start, high = *end, midpoint;
 
-    *count = 0;
     while (low < high) {
-        size_t mid = low + (high - low) / 2;
-
-        if (kc_embdex_term_compare_slice(
-            index->wordmap[mid].source, text, length) < 0)
-            low = mid + 1;
-        else high = mid;
+        midpoint = low + (high - low) / 2;
+        if (kc_embdex_term_compare_prefix(
+            index->wordmap[midpoint].source, text, length) < 0)
+            low = midpoint + 1;
+        else high = midpoint;
     }
-    first = low;
-    while (low < index->word_count &&
-        kc_embdex_term_compare_slice(
-            index->wordmap[low].source, text, length) == 0)
-        low++;
-    *count = low - first;
-    return first;
+    *start = low;
+    high = *end;
+    while (low < high) {
+        midpoint = low + (high - low) / 2;
+        if (kc_embdex_term_compare_prefix(
+            index->wordmap[midpoint].source, text, length) <= 0)
+            low = midpoint + 1;
+        else high = midpoint;
+    }
+    *end = low;
 }
 
 /**
@@ -617,6 +621,7 @@ static size_t kc_embdex_term_match(const kc_embdex_t *index,
     size_t *first, size_t *alternatives)
 {
     size_t limit = size - offset, best = 0;
+    size_t start = 0, end = index->word_count;
 
     *first = 0;
     *alternatives = 0;
@@ -624,9 +629,13 @@ static size_t kc_embdex_term_match(const kc_embdex_t *index,
         limit = index->max_term_length;
     for (size_t length = 1; length <= limit; length++) {
         size_t found = 0;
-        size_t start = kc_embdex_term_find(index,
-            folded + offset, length, &found);
 
+        kc_embdex_term_prefix_range(index,
+            folded + offset, length, &start, &end);
+        if (start == end) break;
+        while (start + found < end &&
+            strlen(index->wordmap[start + found].source) == length)
+            found++;
         if (found != 0 &&
             kc_embdex_term_boundary(folded, size, offset, length)) {
             best = length;
