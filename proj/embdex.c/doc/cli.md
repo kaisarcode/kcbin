@@ -33,13 +33,17 @@ according to JSON syntax. An empty array is permitted.
 
 ## Compile dictionaries
 
-An optional dictionary is a JSON array of source/target string pairs:
+An optional dictionary is a JSON array of source/target UTF-8 term pairs. Each
+term may contain one or more words, numbers, punctuation, or symbols:
 
 ```json
 [
   {"source": "buscar", "target": "find"},
   {"source": "archivos", "target": "files"},
-  {"source": "fichero", "target": "file"}
+  {"source": "fichero", "target": "file"},
+  {"source": "dar de baja", "target": "unsubscribe"},
+  {"source": "C++", "target": "C plus plus"},
+  {"source": "🚀", "target": "rocket"}
 ]
 ```
 
@@ -55,8 +59,12 @@ order supplied. Repeated source words may have different replacements;
 the first is the primary substitution for indexed text, while the others
 remain query alternatives. Exact duplicate pairs are discarded.
 
-Substitutions operate on words, not full-sentence translations. Text
-without a matching dictionary entry is preserved. The compiled map
+Substitutions operate on complete UTF-8 source terms, with the longest match
+taking precedence at each position. The transformed output is not scanned a
+second time. Word-like terms do not match within longer words, while symbol
+sequences can match independently. Input without a matching dictionary entry
+is preserved. ASCII letters are matched without case sensitivity;
+other UTF-8 characters are compared literally. The compiled map
 contains the merged dictionary and does not need the input files during
 search. Dictionaries are optional.
 
