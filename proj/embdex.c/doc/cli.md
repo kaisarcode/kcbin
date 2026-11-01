@@ -25,9 +25,10 @@ Use standard input instead of a file when convenient:
 printf 'find\tfind files by name\n' | embdex build commands.bin
 ```
 
-IDs may repeat. The first tab separates the two fields; neither field
-may be empty. Embedded tabs, line breaks, and NUL bytes are unsupported
-in CLI input. Empty lines are ignored.
+IDs may repeat. The first tab separates the ID from the text; neither
+may be empty. Additional tabs are preserved as part of the text. Embedded
+line breaks and NUL bytes are unsupported in CLI input. Empty lines are
+ignored.
 
 ## Compile dictionaries
 
