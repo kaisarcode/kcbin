@@ -577,6 +577,7 @@ static int kc_test_wordmap(void)
  * Confirm that dictionary keys and values are arbitrary UTF-8 terms.
  * Multiword sources use longest-match substitution; symbols and numbers
  * remain searchable even when their source contains no lexical token.
+ * @return Zero when the term cases pass, otherwise nonzero.
  */
 static int kc_test_terms(void)
 {

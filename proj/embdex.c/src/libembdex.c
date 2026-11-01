@@ -207,6 +207,7 @@ static char *kc_embdex_copy_string(const char *input)
  * Validate UTF-8 terms without imposing lexical token boundaries.
  * BM25 is used solely as a UTF-8 validator here; punctuation and symbols
  * are retained verbatim in the dictionary key.
+ * @return Zero to continue lexical validation.
  */
 static int kc_embdex_term_ignore(const char *token, void *userdata)
 {
@@ -215,6 +216,14 @@ static int kc_embdex_term_ignore(const char *token, void *userdata)
     return 0;
 }
 
+/**
+ * Validate and normalize a dictionary term without discarding UTF-8 symbols.
+ * @param index Index that provides the lexical validator.
+ * @param bytes Term bytes to normalize.
+ * @param size Number of bytes in the term.
+ * @param result Receives an allocated normalized term.
+ * @return KC_EMBDEX_OK or an allocation, lexical, or format error.
+ */
 static int kc_embdex_term_normalize(const kc_embdex_t *index,
     const char *bytes, size_t size, char **result)
 {
@@ -234,7 +243,6 @@ static int kc_embdex_term_normalize(const kc_embdex_t *index,
         return status == KC_BM25_EUTF8 ?
             KC_EMBDEX_ELEXICAL : KC_EMBDEX_EFORMAT;
     }
-    /* ASCII case folding does not strip any UTF-8 code point or symbol. */
     for (size_t i = 0; i < size; i++)
         if (copy[i] >= 'A' && copy[i] <= 'Z')
             copy[i] = (char)(copy[i] - 'A' + 'a');
@@ -265,6 +273,7 @@ static int kc_embdex_word_compare(const void *a, const void *b)
 /**
  * Compare a dictionary term with a prefix of the current input.
  * Returns zero when the key contains at least the requested prefix.
+ * @return Negative, zero, or positive according to the prefix ordering.
  */
 static int kc_embdex_term_compare_prefix(const char *term,
     const char *text, size_t length)
@@ -282,6 +291,7 @@ static int kc_embdex_term_compare_prefix(const char *term,
 /**
  * Narrow a sorted dictionary range to keys sharing an exact prefix.
  * Prefixes that are absent stop the matcher immediately.
+ * @return void
  */
 static void kc_embdex_term_prefix_range(const kc_embdex_t *index,
     const char *text, size_t length, size_t *start, size_t *end)
@@ -505,9 +515,6 @@ static int kc_embdex_wordmap_identity(kc_embdex_t *index)
     uint32_t hash = UINT32_C(2166136261);
     int written;
 
-    /* New term matching differs from old word-normalized dictionaries.
-     * Dictionary-free V1 indexes remain readable; dictionary-bearing
-     * indexes compiled by older builds must be rebuilt. */
     if (index->word_count != 0) {
         const unsigned char *tag =
             (const unsigned char *)"embdex-utf8-terms-v2";
@@ -542,6 +549,7 @@ static int kc_embdex_wordmap_identity(kc_embdex_t *index)
 /**
  * Read the UTF-8 code point at a known character boundary.
  * All callers have already validated their input through BM25.
+ * @return UTF-8 code point beginning at the requested byte position.
  */
 static uint32_t kc_embdex_codepoint(const char *text, size_t pos)
 {
@@ -558,6 +566,12 @@ static uint32_t kc_embdex_codepoint(const char *text, size_t pos)
         ((uint32_t)(p[2] & 0x3fU) << 6) | (p[3] & 0x3fU);
 }
 
+/**
+ * Find the byte offset of the preceding UTF-8 code point.
+ * @param text UTF-8 text containing the code point.
+ * @param pos Byte offset after the preceding code point.
+ * @return Byte offset of the preceding code point.
+ */
 static size_t kc_embdex_previous_codepoint(const char *text, size_t pos)
 {
     size_t previous = pos - 1;
@@ -571,6 +585,7 @@ static size_t kc_embdex_previous_codepoint(const char *text, size_t pos)
 /**
  * Prevent ordinary words from matching inside larger words. Non-word UTF-8
  * symbols, operators and emojis may appear adjacent to other characters.
+ * @return Nonzero when the code point is part of a word.
  */
 static int kc_embdex_term_is_word(uint32_t cp)
 {
@@ -590,6 +605,7 @@ static int kc_embdex_term_is_word(uint32_t cp)
 /**
  * A dictionary source matches as a complete term, not as a substring
  * within a larger alphanumeric token.
+ * @return Nonzero when the source has valid term boundaries.
  */
 static int kc_embdex_term_boundary(const char *text,
     size_t size, size_t start, size_t length)
@@ -611,6 +627,7 @@ static int kc_embdex_term_boundary(const char *text,
 
 /**
  * Case fold ASCII while keeping all UTF-8 symbols and original byte positions.
+ * @return Allocated folded text, or NULL on allocation failure.
  */
 static char *kc_embdex_term_fold(const char *text)
 {
@@ -627,6 +644,7 @@ static char *kc_embdex_term_fold(const char *text)
  * Find the longest complete source term beginning at the given byte offset.
  * Source terms remain sorted; exact binary searches avoid scanning the full
  * dictionary for every character of a query.
+ * @return Length of the longest matching source term.
  */
 static size_t kc_embdex_term_match(const kc_embdex_t *index,
     const char *folded, size_t size, size_t offset,
@@ -697,6 +715,7 @@ static int kc_embdex_word_append(char **buffer, size_t *used,
  * Substitute complete UTF-8 terms, always favoring the longest source match.
  * Scan the original input once: substitutions are never recursively expanded.
  * Unmatched bytes and punctuation are preserved exactly.
+ * @return KC_EMBDEX_OK or an allocation or matching error.
  */
 static int kc_embdex_transform_text(const kc_embdex_t *index,
     const char *text, size_t variant,
@@ -2251,6 +2270,7 @@ static void kc_embdex_trace(const kc_embdex_t *index, const char *query,
 /**
  * Bound substitution combinations over complete matched source terms,
  * not the individual tokens produced by BM25.
+ * @return KC_EMBDEX_OK or an allocation error.
  */
 static int kc_embdex_variant_count(const kc_embdex_t *index,
     const char *query, kc_embdex_variant_plan_t *plan)
@@ -2360,6 +2380,7 @@ static double kc_embdex_score(const kc_embdex_evidence_t *item,
 /**
  * Match a complete UTF-8 term within an arbitrary document without relying
  * on BM25 tokens. This handles symbol-only queries and dictionary targets.
+ * @return Nonzero when the document contains the complete term.
  */
 static int kc_embdex_contains_term(const char *document, const char *term)
 {
@@ -2381,6 +2402,7 @@ static int kc_embdex_contains_term(const char *document, const char *term)
 /**
  * For queries with no BM25 tokens, retain exact literal discovery over
  * source strings and their dictionary-substituted equivalents.
+ * @return KC_EMBDEX_OK or a search error.
  */
 static int kc_embdex_search_untokenized(const kc_embdex_t *index,
     const char *query, size_t limit,
@@ -2529,8 +2551,6 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     if (tokens.count == 0 && index->word_count != 0) {
         int result;
 
-        /* Symbols and emoji may have dictionary translations even though
-         * the lexical analyzer returns no tokens for their source. */
         status = kc_embdex_transform_text(index, query,
             0, NULL, &symbol_query);
         if (status != KC_EMBDEX_OK) goto finished;
@@ -2773,8 +2793,6 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                     kc_embdex_contains(normalized.text,
                         mapped_joined, strlen(mapped_joined)))
                 {
-                    /* A complete translated phrase covers the source
-                     * even when translation changes its token count. */
                     evidence[i].full_phrase = 1;
                     evidence[i].mapped = tokens.count == 64 ?
                         UINT64_MAX :
