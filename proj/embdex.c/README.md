@@ -2,7 +2,7 @@
 
 `embdex` is a candidate narrower. It compiles ID/text associations into
 binary maps and reduces a large search space to a ranked subset of candidates
-for each query. Maps contain their own indexes and optional word dictionaries,
+for each query. Maps contain their own indexes and optional term dictionaries,
 so applications can search them locally without the original input files,
 a database, or a server.
 
@@ -34,7 +34,8 @@ embdex build commands.bin -i corpus.json -d dictionary.json --progress
 embdex search commands.bin "search for a file" --limit 10
 ```
 
-A dictionary contains JSON source/target string pairs and is compiled
+A dictionary relates arbitrary UTF-8 source/target terms, including phrases, numbers,
+and symbols. It is compiled
 into the map. `--progress` shows build stages and embedding completion on
 standard error; without it, building is silent.
 
