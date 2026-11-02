@@ -35,6 +35,7 @@ Set `KCDIST_DIR` to a precompiled kclib distribution containing `libhttp.c` and 
 export KCDIST_DIR="$HOME/kclib/dist"
 make
 make test
+make test wasm  # requires Emscripten, Node.js and WASM libhttp/libregex artifacts
 ```
 
 The target matrix follows kclib: Linux, Windows, macOS, iOS, iOS Simulator, Android and WASM. Each target requires its toolchain and matching precompiled libhttp and libregex artifacts. iOS and iOS Simulator publish the native library only; WASM exports the native API without a command-line executable. These target recipes have not yet been verified by cross-compilation. The build does not rebuild or copy kclib dependencies.
