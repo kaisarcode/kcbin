@@ -194,16 +194,41 @@ $(OUT_CLI): src/route.c $(OUT_STATIC) $(DEP_LIBS)
 		"$(OUT_STATIC)" "$(DEP_REGEX)/libregex.a"
 
 test:
-	@$(MAKE) -s --no-print-directory "$(NATIVE_TARGET)" || exit 1
-	@mkdir -p "$(BUILD_DIR)/test"
-	@$(CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
-		-I"$(KCDIST_DIR)/libhttp.c/$(NATIVE_TARGET)" \
-		-I"$(KCDIST_DIR)/libregex.c/$(NATIVE_TARGET)" \
-		-o "$(BUILD_DIR)/test/route-test" src/test.c \
-		"$(BIN_DIR)/$(NATIVE_TARGET)/libroute.a" \
-		"$(KCDIST_DIR)/libregex.c/$(NATIVE_TARGET)/libregex.a" || exit 1
-	@cp "$(BIN_DIR)/$(NATIVE_TARGET)/route$(TARGET_CLI_EXT)" "$(BUILD_DIR)/test/route" || exit 1
-	@(cd "$(BUILD_DIR)/test" && ./route-test)
+	@if [ -n "$(filter wasm,$(MAKECMDGOALS))" ]; then \
+		command -v "$(WASM_EMCC)" >/dev/null 2>&1 || { echo "route: missing Emscripten compiler $(WASM_EMCC)" >&2; exit 1; }; \
+		command -v "$(WASM_EMAR)" >/dev/null 2>&1 || { echo "route: missing Emscripten archiver $(WASM_EMAR)" >&2; exit 1; }; \
+		node="$(WASM_NODE)"; if [ -n "$(EMSDK_NODE)" ]; then node="$(EMSDK_NODE)"; fi; \
+		command -v "$$node" >/dev/null 2>&1 || { echo "route: missing WASM test runtime $$node" >&2; exit 1; }; \
+		$(MAKE) -s --no-print-directory wasm/wasm32 || exit 1; \
+		mkdir -p "$(BUILD_DIR)/test-wasm" || exit 1; \
+		"$(WASM_EMCC)" -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
+			-I"$(KCDIST_DIR)/libhttp.c/wasm/wasm32" \
+			-I"$(KCDIST_DIR)/libregex.c/wasm/wasm32" \
+			-o "$(BUILD_DIR)/test-wasm/route-test.js" src/test.c \
+			"$(BIN_DIR)/wasm/wasm32/libroute.a" \
+			"$(KCDIST_DIR)/libregex.c/wasm/wasm32/libregex.a" \
+			-sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 || exit 1; \
+		(cd "$(BUILD_DIR)/test-wasm" && "$$node" route-test.js); \
+	else \
+		$(MAKE) -s --no-print-directory "$(NATIVE_TARGET)" || exit 1; \
+		mkdir -p "$(BUILD_DIR)/test" || exit 1; \
+		$(CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
+			-I"$(KCDIST_DIR)/libhttp.c/$(NATIVE_TARGET)" \
+			-I"$(KCDIST_DIR)/libregex.c/$(NATIVE_TARGET)" \
+			-o "$(BUILD_DIR)/test/route-test" src/test.c \
+			"$(BIN_DIR)/$(NATIVE_TARGET)/libroute.a" \
+			"$(KCDIST_DIR)/libregex.c/$(NATIVE_TARGET)/libregex.a" || exit 1; \
+		cp "$(BIN_DIR)/$(NATIVE_TARGET)/route$(TARGET_CLI_EXT)" \
+			"$(BUILD_DIR)/test/route" || exit 1; \
+		(cd "$(BUILD_DIR)/test" && ./route-test); \
+	fi
+
+wasm:
+	@if [ -z "$(filter test,$(MAKECMDGOALS))" ]; then \
+		echo "Use 'make test wasm' to run tests through Emscripten and Node.js." >&2; \
+		exit 1; \
+	fi
+	@:
 
 clean:
 	@rm -rf "$(BIN_DIR)" "$(BUILD_DIR)"
