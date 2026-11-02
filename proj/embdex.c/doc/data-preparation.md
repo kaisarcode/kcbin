@@ -33,7 +33,10 @@ Single-word labels are useful for exact matching, but they frequently lack
 context. For example, `cold` alone can refer to temperature or illness.
 A phrase such as `feeling freezing cold` expresses a narrower sense.
 Keep genuine ambiguity where the entity itself has several meanings;
-do not invent descriptions simply to make tests pass.
+do not invent descriptions simply to make tests pass. A larger corpus may
+improve coverage when it adds genuine associations or useful descriptions.
+Measure that gain against ranking quality, index size, build cost, and
+query latency rather than minimizing record count by default.
 
 When using the current `bge-small-en-v1.5` embedding model, English
 descriptions are generally the more dependable starting point for
@@ -75,9 +78,12 @@ to the domain rather than every possible word form.
 An input expression can have several targets; the first is the primary
 substitution, and further targets are query alternatives. Keep alternatives
 meaningful and limited, since they can increase search-time inference.
-Do not use a large general-purpose dictionary indiscriminately: irrelevant
-senses and extremely common short mappings add noise. Domain-specific
-dictionaries should generally be smaller and more precise.
+Dictionary size is not a quality metric. A broader dictionary may recover
+phrases and vocabulary that a specialized one misses, while a smaller
+dictionary may reduce competing meanings and search cost. Compare both
+using representative queries and relevant IDs at the intended result limit.
+Keep the coverage that improves retrieval and remove mappings shown to
+be misleading or unnecessary.
 
 Dictionary transformations are literal substitutions, not grammatical
 parsing, regular expressions, or logical inference. A transformed phrase
@@ -123,7 +129,9 @@ have no correct match in the package.
 
 Inspect recall at the intended Top-K, the diversity of returned IDs, their
 relative positions, query latency, and the effect of increasing the result
-limit. A score is ranking evidence, not a correctness probability. When a
+limit. Compare broader and narrower corpora and dictionaries with the same
+query set to identify whether more coverage outweighs additional noise
+and cost. A score is ranking evidence, not a correctness probability. When a
 query has no applicable result, embdex may still return nearest candidates;
 the caller must handle that case.
 
