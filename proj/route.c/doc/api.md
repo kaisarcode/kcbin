@@ -18,7 +18,7 @@ Matching uses `kc_regex_open()` and `kc_regex_match()` from `libregex.c`; `route
 
 Up to 16 capturing groups are delivered as borrowed strings through the callback. Group zero (the entire match) is not included in the callback's `captures` array. Optional groups that did not participate are represented by empty strings. The canonical path, query string, ID and captures are valid only during the callback.
 
-For syntax, supported operators, pattern limits and unsupported PCRE features, consult [libregex syntax and limitations](https://kaisarcode.com/kclib/regex), or the [upstream source documentation](https://github.com/kaisarcode/kclib/blob/master/proj/libregex.c/doc/syntax.md). No regular-expression behavior is reimplemented in `route`.
+For syntax, operators, limits and unsupported PCRE features, consult `kclib/proj/libregex.c/doc/syntax.md`. No regular-expression behavior is reimplemented in `route`.
 
 ## Errors and ownership
 
