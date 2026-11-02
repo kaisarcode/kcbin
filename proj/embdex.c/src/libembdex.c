@@ -2112,10 +2112,6 @@ static int kc_embdex_correct_query(const kc_embdex_t *index,
             goto correction_finished;
         }
         if (!kc_embdex_word_exists(index, folded)) {
-            /*
-             * Try both one and two copies: legitimate doubled letters
-             * must remain available (e.g. English "letter").
-             */
             for (size_t keep = 1; keep <= 2 && chosen == NULL; keep++) {
                 size_t written = 0;
 
@@ -2131,7 +2127,7 @@ static int kc_embdex_correct_query(const kc_embdex_t *index,
                     while (i + run < length &&
                         (unsigned char)folded[i] < 128 &&
                         ((folded[i] >= 'a' && folded[i] <= 'z') ||
-                         (folded[i] >= '0' && folded[i] <= '9')) &&
+                        (folded[i] >= '0' && folded[i] <= '9')) &&
                         folded[i + run] == folded[i])
                         run++;
                     if (run >= 3) {
@@ -2151,11 +2147,6 @@ static int kc_embdex_correct_query(const kc_embdex_t *index,
                     kc_embdex_word_exists(index, candidate))
                     chosen = candidate;
             }
-            /*
-             * An adjacent letter transposition is one typing error, but
-             * ordinary Levenshtein counts two edits. Probe candidate
-             * spellings directly, and accept only a unique indexed word.
-             */
             if (status == KC_EMBDEX_OK && chosen == NULL &&
                 length >= 3 && length <= 64 && !has_repetition)
             {
@@ -2386,12 +2377,6 @@ static double kc_embdex_semantic_threshold(const kc_embdex_t *index,
 }
 
 /**
- * Sort accepted associations by descending evidence score and stable ordinal.
- * @param left First candidate.
- * @param right Second candidate.
- * @return Comparison order.
- */
-/**
  * Sort candidate IDs while preserving the score order within each group.
  * @param left First ID and original score rank.
  * @param right Second ID and original score rank.
@@ -2409,6 +2394,12 @@ static int kc_embdex_rank_id_compare(const void *left, const void *right)
     return 0;
 }
 
+/**
+ * Sort accepted associations by descending evidence score and stable ordinal.
+ * @param left First candidate.
+ * @param right Second candidate.
+ * @return Comparison order.
+ */
 static int kc_embdex_rank_compare(const void *left, const void *right)
 {
     const kc_embdex_rank_t *a = (const kc_embdex_rank_t *)left;
@@ -3159,11 +3150,6 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                     evidence[i].mapped_full_phrase)
                     literal_sufficient = 1;
         }
-        /*
-         * An exact translated term already covers a useful candidate
-         * set when enough distinct IDs share it. Avoid embedding a chat
-         * sentence only because the surrounding words are not indexed.
-         */
         if (!literal_sufficient && index->mapped_lexical != NULL &&
             mapped_query != NULL && strcmp(query, mapped_query) != 0)
         {
@@ -3250,10 +3236,6 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                         }
                     }
                 } else {
-                    /*
-                     * HNSW discovers neighbors; acceptance thresholds must
-                     * not discard them before the final ranking.
-                     */
                     int result = kc_hnsw_search(index->graph,
                         embedding, window, -1.0,
                         &semantic, &semantic_count);
@@ -3393,10 +3375,6 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     }
 
     qsort(ranks, rank_count, sizeof(*ranks), kc_embdex_rank_compare);
-    /*
-     * Preserve every association, while discounting repeated IDs so
-     * one command cannot occupy the entire bounded result list.
-     */
     {
         kc_embdex_rank_id_t *ids = (kc_embdex_rank_id_t *)malloc(
             rank_count * sizeof(*ids));

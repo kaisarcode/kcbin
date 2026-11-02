@@ -89,14 +89,14 @@ If both are being created from scratch, design them together:
 
 1. Enumerate the entities or documents and preserve their authoritative IDs.
 2. Describe each entity's meaning, action, objects, and distinguishing
-   context, without attributing capabilities it does not have.
+    context, without attributing capabilities it does not have.
 3. Add short canonical labels where exact phrase retrieval is useful.
 4. List representative user requests in the supported languages and
-   registers, including natural paraphrases and multiword expressions.
+    registers, including natural paraphrases and multiword expressions.
 5. Create dictionary transformations that connect those requests to
-   phrases and concepts actually represented by the corpus.
+    phrases and concepts actually represented by the corpus.
 6. Remove duplicates, misleading senses, invented synonyms, and formulaic
-   description variants.
+    description variants.
 7. Build the map and measure retrieval against independent queries.
 8. Revise either input file on the basis of observed failures, then rebuild.
 
