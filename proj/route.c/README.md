@@ -2,7 +2,7 @@
 
 `route` matches request methods and normalized URI paths against ordered patterns. It selects a destination without opening sockets, sending HTTP responses or running application commands.
 
-Routes use POSIX extended regular expressions with full-path matching. A callback can accept a match or return zero to continue to the next registered route. The caller decides how to execute a selected destination. The core uses the structured request type of `libhttp.c` without modifying that library.
+Routes use a portable regex subset with full-path matching. A callback can accept a match or return zero to continue to the next registered route. The caller decides how to execute a selected destination. The core uses the structured request type of `libhttp.c` without modifying that library.
 
 ## Quick start
 
@@ -37,7 +37,7 @@ make
 make test
 ```
 
-The initial build supports Linux x86_64/aarch64 and macOS x86_64/aarch64 with compatible toolchains. This POSIX regex backend is not a claim of Windows support. The build does not rebuild or copy kclib dependencies.
+The target matrix follows kclib: Linux, Windows, macOS, iOS, iOS Simulator, Android and WASM. Each target requires its toolchain and matching precompiled libhttp artifacts. iOS and iOS Simulator publish the native library only; WASM exports the native API without a command-line executable. These target recipes have not yet been verified by cross-compilation. The build does not rebuild or copy kclib dependencies.
 
 ## Notice
 
