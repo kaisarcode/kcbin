@@ -2154,7 +2154,9 @@ static int kc_embdex_correct_query(const kc_embdex_t *index,
                 index->word_count != 0 && length >= 5 && length <= 24 &&
                 !has_repetition)
             {
-                maximum = length >= 8 ? 2 : 1;
+                size_t word_length = kc_embdex_length(folded);
+
+                maximum = word_length >= 8 ? 2 : 1;
                 best = maximum + 1;
                 matches = 0;
                 for (size_t i = 0; i < index->word_count; i++) {
@@ -2166,8 +2168,8 @@ static int kc_embdex_correct_query(const kc_embdex_t *index,
                         continue;
                     if (strchr(source, ' ') != NULL) continue;
                     source_length = kc_embdex_length(source);
-                    if (source_length > length + maximum ||
-                        length > source_length + maximum) continue;
+                    if (source_length > word_length + maximum ||
+                        word_length > source_length + maximum) continue;
                     if (kc_leven_distance(folded, source, &maximum,
                         &distance) != KC_LEVEN_OK)
                         continue;
