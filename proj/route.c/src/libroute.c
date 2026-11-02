@@ -117,39 +117,28 @@ int kc_route_add(kc_route_t *route, const char *method, const char *pattern,
     const char *id, kc_route_fn handler, void *userdata)
 {
     kc_route_entry_t *entry;
-    char *expression;
-    size_t i, length;
+    size_t i;
 
     if (!route || !method || !*method || !pattern || !id || !*id)
         return KC_ROUTE_EINVAL;
-    length = strlen(pattern);
-    if (length > SIZE_MAX - 3U) return KC_ROUTE_EINVAL;
     entry = (kc_route_entry_t *)calloc(1U, sizeof(*entry));
     if (!entry) return KC_ROUTE_ENOMEM;
     entry->method = kc_route_copy(method);
     entry->id = kc_route_copy(id);
-    expression = (char *)malloc(length + 3U);
-    if (!entry->method || !entry->id || !expression) {
+    if (!entry->method || !entry->id) {
         free(entry->method);
         free(entry->id);
-        free(expression);
         free(entry);
         return KC_ROUTE_ENOMEM;
     }
     for (i = 0U; entry->method[i]; ++i)
         entry->method[i] = (char)toupper((unsigned char)entry->method[i]);
-    expression[0] = '^';
-    memcpy(expression + 1U, pattern, length);
-    expression[length + 1U] = '$';
-    expression[length + 2U] = '\0';
-    if (regcomp(&entry->regex, expression, REG_EXTENDED) != 0) {
-        free(expression);
+    if (regcomp(&entry->regex, pattern, REG_EXTENDED) != 0) {
         free(entry->method);
         free(entry->id);
         free(entry);
         return KC_ROUTE_EPATTERN;
     }
-    free(expression);
     entry->handler = handler;
     entry->userdata = userdata;
     if (route->last) route->last->next = entry;
@@ -197,7 +186,8 @@ int kc_route_run(const kc_route_t *route, const char *method,
         slots = entry->regex.re_nsub < KC_ROUTE_CAPTURES ?
             entry->regex.re_nsub : KC_ROUTE_CAPTURES;
         if (regexec(&entry->regex, path, slots + 1U,
-                positions, 0) != 0) continue;
+                positions, 0) != 0 || positions[0].rm_so != 0 ||
+                (size_t)positions[0].rm_eo != strlen(path)) continue;
         for (i = 1U; i <= slots; ++i) {
             size_t width;
 
