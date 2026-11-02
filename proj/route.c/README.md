@@ -2,7 +2,7 @@
 
 `route` matches request methods and normalized URI paths against ordered patterns. It selects a destination without opening sockets, sending HTTP responses or running application commands.
 
-Routes use a portable regex subset with full-path matching. A callback can accept a match or return zero to continue to the next registered route. The caller decides how to execute a selected destination. The core uses the structured request type of `libhttp.c` without modifying that library.
+Routes use the portable `libregex.c` API for compiled expressions, capture groups and full-path matching. A callback can accept a match or return zero to continue to the next registered route. The caller decides how to execute a selected destination. The core uses the structured request type of `libhttp.c` and composes `libregex.c` without modifying either library.
 
 ## Quick start
 
@@ -29,7 +29,7 @@ Unmatched requests print `null`. The tool also supports repeated `--route` optio
 
 ## Build
 
-Set `KCDIST_DIR` to a precompiled kclib distribution containing `libhttp.c` for the selected target:
+Set `KCDIST_DIR` to a precompiled kclib distribution containing `libhttp.c` and `libregex.c` for the selected target:
 
 ```sh
 export KCDIST_DIR="$HOME/kclib/dist"
@@ -37,7 +37,7 @@ make
 make test
 ```
 
-The target matrix follows kclib: Linux, Windows, macOS, iOS, iOS Simulator, Android and WASM. Each target requires its toolchain and matching precompiled libhttp artifacts. iOS and iOS Simulator publish the native library only; WASM exports the native API without a command-line executable. These target recipes have not yet been verified by cross-compilation. The build does not rebuild or copy kclib dependencies.
+The target matrix follows kclib: Linux, Windows, macOS, iOS, iOS Simulator, Android and WASM. Each target requires its toolchain and matching precompiled libhttp and libregex artifacts. iOS and iOS Simulator publish the native library only; WASM exports the native API without a command-line executable. These target recipes have not yet been verified by cross-compilation. The build does not rebuild or copy kclib dependencies.
 
 ## Notice
 
