@@ -1,5 +1,5 @@
 ## Makefile
-## Summary: Cross-compiles route using precompiled target-matched libhttp.
+## Summary: Cross-compiles route using target-matched libhttp and libregex.
 ##
 ## Author:  KaisarCode
 ## Website: https://kaisarcode.com
@@ -141,9 +141,11 @@ wasm/wasm32:
 		TARGET_EXT=wasm TARGET_CFLAGS="" TARGET_SYSTEM_LIBS="-lm" \
 		TARGET_SHARED="--no-entry -sSTANDALONE_WASM=1 -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 -sEXPORTED_FUNCTIONS=_kc_route_open,_kc_route_add,_kc_route_run,_kc_route_http,_kc_route_close,_kc_route_strerror,_kc_route_version"
 
-DEP_DIR = $(KCDIST_DIR)/libhttp.c/$(TARGET)
-DEP_HEADER = $(DEP_DIR)/libhttp.h
-DEP_LIB = $(DEP_DIR)/libhttp.a
+DEP_HTTP = $(KCDIST_DIR)/libhttp.c/$(TARGET)
+DEP_REGEX = $(KCDIST_DIR)/libregex.c/$(TARGET)
+DEP_HEADERS = $(DEP_HTTP)/libhttp.h $(DEP_REGEX)/libregex.h
+DEP_LIBS = $(DEP_HTTP)/libhttp.a $(DEP_REGEX)/libregex.a
+DEP_INCLUDES = -I"$(DEP_HTTP)" -I"$(DEP_REGEX)"
 OUT_DIR = $(BIN_DIR)/$(TARGET)
 OUT_OBJECT = $(BUILD_DIR)/$(TARGET)/libroute.o
 OUT_STATIC = $(OUT_DIR)/libroute.a
@@ -155,8 +157,9 @@ check-deps:
 	@test -n "$(KCDIST_DIR)" || { echo "route: set KCDIST_DIR to the precompiled kclib distribution" >&2; exit 1; }
 	@command -v "$(TARGET_CC)" >/dev/null 2>&1 || { echo "route: missing target compiler $(TARGET_CC)" >&2; exit 1; }
 	@command -v "$(TARGET_AR)" >/dev/null 2>&1 || { echo "route: missing target archiver $(TARGET_AR)" >&2; exit 1; }
-	@test -f "$(DEP_HEADER)" || { echo "route: missing dependency header $(DEP_HEADER)" >&2; exit 1; }
-	@test -f "$(DEP_LIB)" || { echo "route: missing dependency archive $(DEP_LIB)" >&2; exit 1; }
+	@for file in $(DEP_HEADERS) $(DEP_LIBS); do \
+		test -f "$$file" || { echo "route: missing dependency for $(TARGET): $$file" >&2; exit 1; }; \
+	done
 	@if [ -n "$(TARGET_SDK)" ]; then test -d "$(TARGET_SDK)" || { echo "route: missing SDK $(TARGET_SDK)" >&2; exit 1; }; fi
 
 build-target: check-deps
@@ -169,33 +172,36 @@ build-target: check-deps
 		KCDIST_DIR="$(KCDIST_DIR)" BUILD_VERSION="$(BUILD_VERSION)"
 	@echo "OK $(TARGET)"
 
-$(OUT_OBJECT): src/libroute.c src/libroute.h Makefile $(DEP_HEADER)
+$(OUT_OBJECT): src/libroute.c src/libroute.h Makefile $(DEP_HEADERS)
 	@mkdir -p "$(dir $@)"
 	@$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror $(TARGET_CFLAGS) \
-		-DKC_ROUTE_BUILD_VERSION=$(BUILD_VERSION) -Isrc -I"$(DEP_DIR)" \
+		-DKC_ROUTE_BUILD_VERSION=$(BUILD_VERSION) -Isrc $(DEP_INCLUDES) \
 		-c -o "$@" src/libroute.c
 
 $(OUT_STATIC): $(OUT_OBJECT)
 	@mkdir -p "$(OUT_DIR)"
 	@$(TARGET_AR) rcs "$@" "$(OUT_OBJECT)"
 
-$(OUT_SHARED): $(OUT_OBJECT)
+$(OUT_SHARED): $(OUT_OBJECT) $(DEP_LIBS)
 	@mkdir -p "$(OUT_DIR)"
-	@$(TARGET_CC) $(TARGET_SHARED) -o "$@" "$(OUT_OBJECT)"
+	@$(TARGET_CC) $(TARGET_SHARED) -o "$@" "$(OUT_OBJECT)" "$(DEP_REGEX)/libregex.a"
 
-$(OUT_CLI): src/route.c $(OUT_STATIC)
+$(OUT_CLI): src/route.c $(OUT_STATIC) $(DEP_LIBS)
 	@mkdir -p "$(BUILD_DIR)/$(TARGET)"
-	@$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc -I"$(DEP_DIR)" \
+	@$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc $(DEP_INCLUDES) \
 		-c -o "$(BUILD_DIR)/$(TARGET)/route.o" src/route.c
-	@$(TARGET_CC) -o "$@" "$(BUILD_DIR)/$(TARGET)/route.o" "$(OUT_STATIC)"
+	@$(TARGET_CC) -o "$@" "$(BUILD_DIR)/$(TARGET)/route.o" \
+		"$(OUT_STATIC)" "$(DEP_REGEX)/libregex.a"
 
 test:
 	@$(MAKE) -s --no-print-directory "$(NATIVE_TARGET)" || exit 1
 	@mkdir -p "$(BUILD_DIR)/test"
 	@$(CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
 		-I"$(KCDIST_DIR)/libhttp.c/$(NATIVE_TARGET)" \
+		-I"$(KCDIST_DIR)/libregex.c/$(NATIVE_TARGET)" \
 		-o "$(BUILD_DIR)/test/route-test" src/test.c \
-		"$(BIN_DIR)/$(NATIVE_TARGET)/libroute.a" || exit 1
+		"$(BIN_DIR)/$(NATIVE_TARGET)/libroute.a" \
+		"$(KCDIST_DIR)/libregex.c/$(NATIVE_TARGET)/libregex.a" || exit 1
 	@cp "$(BIN_DIR)/$(NATIVE_TARGET)/route$(TARGET_CLI_EXT)" "$(BUILD_DIR)/test/route" || exit 1
 	@(cd "$(BUILD_DIR)/test" && ./route-test)
 
