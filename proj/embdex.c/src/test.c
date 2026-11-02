@@ -737,7 +737,7 @@ static int kc_test_chat_corrections(void)
     const char *dictionaries[] = {dictionary};
     const char *queries[] = {
         "Vamos que hoy hay fiestaaaaaaaa!",
-        "Vamos que hoy hay fiestq!"
+        "Vamos que hoy hay fietsa!"
     };
     kc_embdex_t *index = NULL;
     FILE *file;
