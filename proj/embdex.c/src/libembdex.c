@@ -3133,15 +3133,15 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                 int repeated = 0;
 
                 if (evidence[i].mapped_hits == 0) continue;
-                for (size_t j = 0; j < i; j++) {
-                    if (evidence[j].mapped_hits != 0 &&
-                        strcmp(index->records[i].id,
-                            index->records[j].id) == 0) {
+                for (size_t j = 0; j < distinct; j++) {
+                    if (strcmp(index->records[i].id,
+                        index->records[ranks[j].ordinal].id) == 0) {
                         repeated = 1;
                         break;
                     }
                 }
-                if (!repeated) distinct++;
+                if (!repeated)
+                    ranks[distinct++].ordinal = i;
             }
             if (distinct >= limit) literal_sufficient = 1;
         }
