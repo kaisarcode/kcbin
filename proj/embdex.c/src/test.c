@@ -109,6 +109,11 @@ static int kc_test_search(void)
         failed |= !state.found || !state.ordered;
         state = (kc_test_results_t){0};
         state.ordered = 1;
+        failed |= kc_embdex_search(index, "authenticationnn", &options,
+            kc_test_receive, &state) != KC_EMBDEX_OK;
+        failed |= state.count == 0 || !state.found || !state.ordered;
+        state = (kc_test_results_t){0};
+        state.ordered = 1;
         state.maximum = 1;
         failed |= kc_embdex_search(index, "authentication", NULL,
             kc_test_receive, &state) != KC_EMBDEX_OK;
