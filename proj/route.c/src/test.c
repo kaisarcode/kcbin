@@ -64,10 +64,10 @@ static int kc_test_receive(const kc_route_match_t *match, void *userdata)
         strcmp(match->path, state->expected_path) != 0 ||
         (state->expected_query &&
             (!match->query ||
-             strcmp(match->query, state->expected_query) != 0)) ||
+            strcmp(match->query, state->expected_query) != 0)) ||
         (state->expected_capture &&
             (match->capture_count == 0U ||
-             strcmp(match->captures[0], state->expected_capture) != 0)))
+            strcmp(match->captures[0], state->expected_capture) != 0)))
         state->valid = 0;
     return state->reject ? 0 : 1;
 }

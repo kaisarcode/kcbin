@@ -102,7 +102,7 @@ static int route_match(int argc, char **argv)
     for (i = 4; i < argc; i += 4) {
         if (argc - i < 4 ||
             (strcmp(argv[i], "-r") != 0 &&
-             strcmp(argv[i], "--route") != 0)) {
+            strcmp(argv[i], "--route") != 0)) {
             fprintf(stderr, "route: expected -r <method> <pattern> <id>\n");
             kc_route_close(route);
             return 1;
