@@ -53,12 +53,12 @@ typedef int (*kc_route_fn)(const kc_route_match_t *match, void *userdata);
 int kc_route_open(kc_route_t **out);
 
 /**
- * Register an HTTP method and POSIX extended path expression.
- * The pattern is anchored to the complete canonical path. "ALL" accepts
+ * Register an HTTP method and portable route path expression.
+ * The pattern matches the complete canonical path. "ALL" accepts
  * any method. NULL handler accepts the first matching route.
  * @param route Registry receiving the entry.
  * @param method HTTP method or ALL, case-insensitive.
- * @param pattern POSIX extended regular expression without delimiters.
+ * @param pattern Portable regular expression subset without delimiters.
  * @param id Destination ID copied into the registry.
  * @param handler Optional callback; zero continues to subsequent entries.
  * @param userdata Callback context, borrowed until registry destruction.
