@@ -149,36 +149,145 @@ from each domain and compare index versions using the same query set.
 
 ## Using an AI to prepare the package
 
-An AI can draft the corpus, dictionary, and evaluation queries from a
-catalog of real entities. Give it the actual entity list, source
-descriptions, domain, intended input languages, locale, and known user
-expressions. It must not invent entity IDs or behaviors.
+An AI can assist with drafting descriptions, term substitutions, and test
+queries, but the input catalog remains authoritative. The goal is to help
+embdex retrieve relevant candidates, not to teach the model to return a
+single final answer. No generated entry should invent a capability, ID,
+document, or factual claim.
 
-A reusable instruction is:
+### What to provide
 
-> Produce embdex data for the supplied entities. Return a corpus JSON
-> array of {id,text} associations and an optional dictionary JSON array
-> of {source,target} literal UTF-8 substitutions. Preserve all supplied
-> IDs. Describe real distinct meanings and user intents, not repeated
-> template sentences. Use the language best suited to the configured
-> embedding model for the indexed text. Derive dictionary entries from
-> likely user phrasing in the specified languages and locale, including
-> useful conjugations, expressions, and multiword terms; preserve
-> negation and meaningful distinctions. Prefer a compact, specialized
-> dictionary to broad speculative translations. Do not create false
-> associations. Supply a separate test set of natural queries and
-> expected relevant IDs. State which entries are uncertain, and do not
-> claim retrieval quality was validated without running the index.
+Give the model enough context to describe real content and anticipate real
+queries:
 
-The output schema for the two build inputs must remain exactly the
-documented `id`/`text` and `source`/`target` arrays; any tests,
-confidence notes, or generation metadata belong in separate files.
+- **Entities:** authoritative IDs and actual descriptions, documents, or
+    excerpts. Preserve IDs exactly, including repeated IDs where an entity
+    has several useful associations.
+- **Purpose:** what each ID represents and what the consuming application
+    will do with the retrieved candidates.
+- **Query examples:** realistic ways users ask for that content, ideally
+    collected independently from usage rather than generated from the
+    descriptions themselves.
+- **Language and locale:** input languages, regional vocabulary, register,
+    abbreviations, technical terms, and common alternative spellings.
+- **Model and format:** the embedding model used by the index and the exact
+    corpus and dictionary JSON schemas.
+- **Constraints:** terms that must remain distinct, sensitive negation,
+    forbidden or unsupported interpretations, and whether the original
+    corpus may be edited.
+- **Retrieval target:** intended result limit, representative query length,
+    resource constraints, and existing retrieval failures if available.
 
-A generated package is a draft until tested. Where generation is
-iterative, provide the AI with failed queries, expected relevant IDs,
-returned candidates, and rankings. Ask it to identify whether the
-failure belongs to the corpus, dictionary, or engine before proposing
-a data change.
+Provide a representative sample first when the catalog is large. Ask for a
+small batch that can be reviewed and tested before processing the entire
+collection. The model needs the real source content; a list of IDs alone
+is insufficient to write trustworthy descriptions.
+
+### What to generate
+
+Request three separate deliverables:
+
+1. `corpus.json`: a JSON array of `{"id":"...","text":"..."}`
+    associations. Every description must be grounded in its source item;
+    multiple distinct descriptions may share one ID.
+2. `dictionary.json`: a JSON array of
+    `{"source":"...","target":"..."}` literal UTF-8 substitutions.
+    These map likely input expressions to terms represented by the
+    corpus. They are not stemming or grammar rules.
+3. `queries.json`: a separate evaluation set of natural queries with
+    expected relevant IDs. It is not passed to the embdex builder.
+
+Keep generation notes, doubtful mappings, provenance, and evaluation
+metadata out of the two build files. Review apparent synonyms carefully:
+a related word is not always interchangeable, and a translation can change
+meaning, polarity, or scope. Avoid mechanically multiplying descriptions
+with generic templates.
+
+### Example prompt
+
+Copy this prompt and replace the bracketed inputs with source material
+from the application. The output files should be returned separately as
+valid JSON without prose inside the JSON.
+
+```text
+You are preparing retrieval data for embdex, a candidate narrower.
+It returns ranked associations, not definitive answers.
+
+Application purpose:
+[What the consuming application does with candidate IDs]
+
+Authoritative source catalog:
+[ID and actual text, metadata, or document excerpts for each item]
+
+Typical user queries:
+[Real or representative queries, including difficult queries]
+
+Input languages and locale:
+[Languages, region, register, relevant abbreviations and vocabulary]
+
+Embedding model:
+[bge-small-en-v1.5 or the model actually in use]
+
+Retrieval constraints:
+[Expected Top-K, important distinctions, resource budget,
+existing corpus or dictionary that must be preserved]
+
+Prepare three separate JSON outputs:
+
+corpus.json:
+- Use exactly an array of {"id":"...","text":"..."} objects.
+- Preserve every authoritative ID. Never invent items or capabilities.
+- Describe each item's genuine meaning, actions, objects, and context.
+- Provide additional associations only for distinct useful descriptions.
+- Prefer the language appropriate to the embedding model where useful.
+- Do not generate formulaic paraphrases merely to increase corpus size.
+
+dictionary.json:
+- Use exactly an array of {"source":"...","target":"..."} objects.
+- Map likely input terms and expressions to meaningful corpus language.
+- Include useful regional forms, variants, and complete phrases.
+- Preserve negation, technical distinctions, and multiword meaning.
+- Do not invent stemming rules, regexes, or additional schema fields.
+- Avoid ambiguous and misleading substitutions.
+- Do not assume that a larger dictionary is always better.
+
+queries.json:
+- Produce a separate array of objects with "query" and "relevant_ids".
+- Use real or independently written natural queries where provided.
+- Include positive, ambiguous, misspelled, and out-of-scope examples.
+- Use only authoritative IDs; use [] when no result should be relevant.
+- Distinguish generated test suggestions from observed user queries.
+
+Return valid UTF-8 JSON for each file separately. Report uncertain
+associations outside the build JSON. Do not assert that retrieval quality
+is validated: that requires building and searching the resulting index.
+```
+
+A generated test set is useful for finding obvious errors, but it may
+share the same assumptions as the generated corpus. Keep a separate
+holdout set of real queries and manually checked relevant IDs where
+possible; otherwise report the limits of the evaluation.
+
+### Iterate using retrieval results
+
+Build the index and test the generated data before requesting revisions:
+
+```sh
+embdex build index.bin -i corpus.json -d dictionary.json --progress
+embdex search index.bin "representative query" --limit 10
+```
+
+Give the model the failed query, the actual ranked results and scores,
+the relevant IDs, and the source items they represent. Ask it to diagnose
+whether the issue is missing content, poor descriptions, a misleading
+substitution, ambiguity, or ranking behavior. Request only the changes
+supported by that evidence.
+
+Compare a baseline with revised corpus and dictionary sizes using the
+same independent queries. Measure relevant IDs in Top-K, result
+diversity, latency, and index size. Both additional coverage and reduced
+noise can improve retrieval, depending on the case. Keep only
+changes that provide a useful measured tradeoff.
 
 ## Next step
 
