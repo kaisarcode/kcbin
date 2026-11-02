@@ -15,8 +15,10 @@
 
 #ifdef _WIN32
 #define KC_TEST_CLI ".\\route.exe"
+#define KC_TEST_PATTERN "\"/notes/([0-9]+)\""
 #else
 #define KC_TEST_CLI "./route"
+#define KC_TEST_PATTERN "'/notes/([0-9]+)'"
 #endif
 
 #ifdef __EMSCRIPTEN__
@@ -271,7 +273,7 @@ static int kc_test_cli(void)
     int failed;
 
     failed = kc_test_command(KC_TEST_CLI
-        " match GET /notes/42 -r GET '/notes/([0-9]+)' item"
+        " match GET /notes/42 -r GET " KC_TEST_PATTERN " item"
         " > route-test.json") != 0;
     input = fopen("route-test.json", "rb");
     if (!input) return 1;
