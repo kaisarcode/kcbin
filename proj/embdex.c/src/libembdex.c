@@ -2072,6 +2072,7 @@ static int kc_embdex_correct_query(const kc_embdex_t *index,
     while (offset < size) {
         size_t start = offset, end;
         char *word = NULL, *folded = NULL, *candidate = NULL;
+        char *transposed = NULL;
         const char *chosen = NULL;
         size_t length, maximum, best, matches;
         int has_repetition = 0;
@@ -2150,6 +2151,42 @@ static int kc_embdex_correct_query(const kc_embdex_t *index,
                     kc_embdex_word_exists(index, candidate))
                     chosen = candidate;
             }
+            /*
+             * An adjacent letter transposition is one typing error, but
+             * ordinary Levenshtein counts two edits. Probe candidate
+             * spellings directly, and accept only a unique indexed word.
+             */
+            if (status == KC_EMBDEX_OK && chosen == NULL &&
+                length >= 3 && length <= 64 && !has_repetition)
+            {
+                size_t transposition_matches = 0;
+
+                transposed = kc_embdex_copy_string(folded);
+                if (transposed == NULL) status = KC_EMBDEX_ENOMEM;
+                else for (size_t i = 0; i + 1 < length; i++) {
+                    char left = transposed[i], right = transposed[i + 1];
+
+                    if (left == right || left < 'a' || left > 'z' ||
+                        right < 'a' || right > 'z') continue;
+                    transposed[i] = right;
+                    transposed[i + 1] = left;
+                    if (kc_embdex_word_exists(index, transposed)) {
+                        transposition_matches++;
+                        if (transposition_matches == 1) {
+                            free(candidate);
+                            candidate = kc_embdex_copy_string(transposed);
+                            if (candidate == NULL) {
+                                status = KC_EMBDEX_ENOMEM;
+                                break;
+                            }
+                        }
+                    }
+                    transposed[i] = left;
+                    transposed[i + 1] = right;
+                }
+                if (transposition_matches == 1 && status == KC_EMBDEX_OK)
+                    chosen = candidate;
+            }
             if (status == KC_EMBDEX_OK && chosen == NULL &&
                 index->word_count != 0 && length >= 5 && length <= 24 &&
                 !has_repetition)
@@ -2190,6 +2227,7 @@ static int kc_embdex_correct_query(const kc_embdex_t *index,
             status = kc_embdex_word_append(&corrected, &used, &capacity,
                 replacement, strlen(replacement));
         }
+        free(transposed);
         free(candidate);
         free(folded);
         free(word);
