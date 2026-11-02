@@ -2780,6 +2780,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
         limit = *options->limit;
     if (limit == 0 || index->count == 0 || query[0] == '\0')
         return KC_EMBDEX_OK;
+    if (!kc_embdex_utf8_valid(query, strlen(query)))
+        return KC_EMBDEX_ELEXICAL;
     if (index->count > SIZE_MAX / sizeof(*evidence) ||
         index->count > SIZE_MAX / sizeof(*ranks))
         return KC_EMBDEX_ENOMEM;
