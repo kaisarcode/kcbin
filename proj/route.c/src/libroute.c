@@ -180,6 +180,7 @@ int kc_route_run(const kc_route_t *route, const char *method,
 
     for (entry = route->first; entry; entry = entry->next) {
         regmatch_t positions[KC_ROUTE_CAPTURES + 1U];
+        size_t slots;
         const char *groups[KC_ROUTE_CAPTURES];
         char *allocated[KC_ROUTE_CAPTURES] = {0};
         kc_route_match_t match;
@@ -193,9 +194,11 @@ int kc_route_run(const kc_route_t *route, const char *method,
             }
             if (method[i] || entry->method[i]) continue;
         }
-        if (regexec(&entry->regex, path, KC_ROUTE_CAPTURES + 1U,
+        slots = entry->regex.re_nsub < KC_ROUTE_CAPTURES ?
+            entry->regex.re_nsub : KC_ROUTE_CAPTURES;
+        if (regexec(&entry->regex, path, slots + 1U,
                 positions, 0) != 0) continue;
-        for (i = 1U; i <= KC_ROUTE_CAPTURES; ++i) {
+        for (i = 1U; i <= slots; ++i) {
             size_t width;
 
             if (positions[i].rm_so < 0) break;
@@ -207,7 +210,7 @@ int kc_route_run(const kc_route_t *route, const char *method,
             groups[count] = allocated[count];
             ++count;
         }
-        if (i <= KC_ROUTE_CAPTURES) {
+        if (i <= slots) {
             while (count) free(allocated[--count]);
             free(path);
             free(query);
