@@ -23,6 +23,7 @@ extern "C" {
 #define KC_ROUTE_ENOMEM -2
 #define KC_ROUTE_EPATTERN -3
 #define KC_ROUTE_EURI -4
+#define KC_ROUTE_ELIMIT -5
 #define KC_ROUTE_CAPTURES 16
 
 typedef struct kc_route kc_route_t;
@@ -58,7 +59,7 @@ int kc_route_open(kc_route_t **out);
  * any method. NULL handler accepts the first matching route.
  * @param route Registry receiving the entry.
  * @param method HTTP method or ALL, case-insensitive.
- * @param pattern Portable regular expression subset without delimiters.
+ * @param pattern libregex expression without delimiters.
  * @param id Destination ID copied into the registry.
  * @param handler Optional callback; zero continues to subsequent entries.
  * @param userdata Callback context, borrowed until registry destruction.
@@ -75,7 +76,7 @@ int kc_route_add(kc_route_t *route, const char *method, const char *pattern,
  * @param method Request method.
  * @param target URI target beginning with a slash.
  * @param matched Receives whether a registration accepted the request.
- * @return KC_ROUTE_OK or a negative status code.
+ * @return KC_ROUTE_OK, KC_ROUTE_ELIMIT, or another negative status.
  */
 int kc_route_run(const kc_route_t *route, const char *method,
     const char *target, int *matched);
