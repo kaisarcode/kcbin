@@ -18,8 +18,9 @@ Search combines these independent retrieval mechanisms:
 - Before lookup, unknown query words may be corrected against dictionary
     sources and indexed corpus words. Three or more repeated ASCII letters
     can be reduced to one or two only when the result exists in a searchable
-    vocabulary. Unique dictionary-source spelling corrections use bounded
-    Levenshtein distance. The existing corpus-vocabulary Levenshtein retrieval
+    vocabulary. Adjacent ASCII-letter transpositions are also checked against
+    the indexed vocabulary and accepted only when unambiguous. Unique
+    dictionary-source spelling corrections use bounded Levenshtein distance. The existing corpus-vocabulary Levenshtein retrieval
     remains available for terms not otherwise matched.
 - Morphological variants and regional expressions belong in the dictionary;
     this correction does not apply language-specific stemming rules.
