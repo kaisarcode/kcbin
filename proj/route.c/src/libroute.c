@@ -1,6 +1,6 @@
 /**
  * libroute.c - HTTP route selection.
- * Summary: Matches ordered method and URI patterns using POSIX regex.
+ * Summary: Matches ordered HTTP method and URI patterns portably.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -22,7 +22,7 @@
 #define KC_ROUTE_PATTERN_MAX 4096U
 #define KC_ROUTE_NODES_MAX 512U
 #define KC_ROUTE_STEPS_MAX 100000U
-#define KC_ROUTE_DEPTH_MAX 256U
+#define KC_ROUTE_DEPTH_MAX 4096U
 
 typedef enum {
     KC_ROUTE_CHAR, KC_ROUTE_DOT, KC_ROUTE_CLASS, KC_ROUTE_SEQUENCE,
