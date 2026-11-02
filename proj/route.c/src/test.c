@@ -19,7 +19,7 @@
 #define KC_TEST_CLI "./route"
 #endif
 
-#define KC_TEST_TOTAL 10
+#define KC_TEST_TOTAL 11
 
 static int kc_test_current;
 static int kc_test_failed;
@@ -306,6 +306,32 @@ static int kc_test_cli_errors(void)
 }
 
 /**
+ * Verify portable alternation, classes and repeated groups.
+ * @return Nonzero when a representative portable expression fails.
+ */
+static int kc_test_portable(void)
+{
+    kc_route_t *route = NULL;
+    int found = 0, failed = 0;
+
+    failed |= kc_route_open(&route) != KC_ROUTE_OK;
+    if (!failed) {
+        failed |= kc_route_add(route, "GET",
+            "/(docs|pages)/([a-z]+-[0-9]+)", "item",
+            NULL, NULL) != KC_ROUTE_OK;
+        failed |= kc_route_run(route, "GET", "/pages/abc-28",
+            &found) != KC_ROUTE_OK;
+        failed |= found != 1;
+        found = 0;
+        failed |= kc_route_run(route, "GET", "/other/abc-28",
+            &found) != KC_ROUTE_OK;
+        failed |= found != 0;
+    }
+    kc_route_close(route);
+    return failed;
+}
+
+/**
  * Execute the named contract cases.
  * @return Zero when every case passes.
  */
@@ -331,6 +357,8 @@ int main(void)
         kc_test_cli());
     kc_test_result("cli_errors", "reports null matches and rejects bad syntax",
         kc_test_cli_errors());
+    kc_test_result("portable", "matches alternation, classes and repeats",
+        kc_test_portable());
     printf("%d passed, %d failed\n",
         kc_test_current - kc_test_failed, kc_test_failed);
     return kc_test_failed ? 1 : 0;
