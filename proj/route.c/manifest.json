@@ -1,0 +1,10 @@
+{
+  "name": "route",
+  "description": "Matches ordered HTTP methods and URI patterns and selects route destinations.",
+  "author": "KaisarCode",
+  "license": "LGPL-3.0-only",
+  "website": "https://kaisarcode.com",
+  "repository": "https://github.com/kaisarcode/kcbin/tree/master/proj/route.c",
+  "level": 1,
+  "dependencies": ["libhttp"]
+}
