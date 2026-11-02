@@ -29,7 +29,7 @@
 #ifdef __EMSCRIPTEN__
 #define KC_TEST_TOTAL 8
 #else
-#define KC_TEST_TOTAL 12
+#define KC_TEST_TOTAL 13
 #endif
 
 static int kc_test_current = 0;
@@ -714,6 +714,70 @@ static int kc_test_trace_embeddings(const char *path, size_t count)
 }
 
 /**
+ * Confirm chat-style letter elongation and misspellings are corrected
+ * against dictionary sources before semantic retrieval is attempted.
+ * @return Zero when both queries find the party associations lexically.
+ */
+static int kc_test_chat_corrections(void)
+{
+    const kc_embdex_document_t documents[] = {
+        {"party-a", "party"},
+        {"party-b", "party time"},
+        {"party-c", "party celebration"},
+        {"other", "quiet weather"}
+    };
+    const char *path = "embdex-test-chat.bin";
+    const char *dictionary = "embdex-test-chat.json";
+    const char *trace = "embdex-test-chat.jsonl";
+    const char *dictionaries[] = {dictionary};
+    const char *queries[] = {
+        "Vamos que hoy hay fiestaaaaaaaa!",
+        "Vamos que hoy hay fietsa!"
+    };
+    kc_embdex_t *index = NULL;
+    FILE *file;
+    int failed = 0;
+    size_t limit = 2;
+    kc_embdex_search_options_t options = {.limit = &limit};
+
+    remove(path);
+    remove(dictionary);
+    remove(trace);
+    file = fopen(dictionary, "w");
+    if (file == NULL) failed = 1;
+    else {
+        failed |= fputs(
+            "[{\"source\":\"fiesta\",\"target\":\"party\"}]",
+            file) == EOF;
+        failed |= fclose(file) != 0;
+    }
+    if (!failed)
+        failed |= kc_embdex_build_with_dictionaries(path, documents, 4,
+            dictionaries, 1, NULL) != KC_EMBDEX_OK;
+    remove(dictionary);
+    if (!failed)
+        failed |= kc_embdex_open(&index, path) != KC_EMBDEX_OK;
+    if (!failed)
+        failed |= kc_test_trace_env(trace) != 0;
+    for (size_t i = 0; i < 2 && !failed; i++) {
+        kc_embdex_match_test_t result = {0};
+
+        failed |= kc_embdex_search(index, queries[i], &options,
+            kc_test_match, &result) != KC_EMBDEX_OK;
+        failed |= result.count != 2 ||
+            strncmp(result.first_id, "party-", 6) != 0;
+        failed |= kc_test_trace_embeddings(trace, 0);
+        remove(trace);
+    }
+    failed |= kc_test_trace_env(NULL) != 0;
+    kc_embdex_close(index);
+    remove(path);
+    remove(trace);
+    return kc_test_result("chat_corrections",
+        "corrects chat spelling and skips unnecessary embeddings", failed);
+}
+
+/**
  * Confirm that a complete literal phrase bypasses inference while
  * a query covered by separate associations still invokes semantics.
  * @return Zero when the fallback gate matches the expected behavior.
@@ -958,6 +1022,8 @@ static int kc_test_run(const char *name)
 #ifndef __EMSCRIPTEN__
     if (strcmp(name, "wordmap") == 0) return kc_test_wordmap();
     if (strcmp(name, "terms") == 0) return kc_test_terms();
+    if (strcmp(name, "chat_corrections") == 0)
+        return kc_test_chat_corrections();
     if (strcmp(name, "semantic_fallback") == 0)
         return kc_test_semantic_fallback();
     if (strcmp(name, "cli_info") == 0) return kc_test_cli_info();
@@ -979,7 +1045,8 @@ int main(int argc, char **argv)
         "search", "duplicates", "invalid", "format",
         "relevance", "composition", "query", "progress",
 #ifndef __EMSCRIPTEN__
-        "wordmap", "terms", "semantic_fallback", "cli_info", "cli",
+        "wordmap", "terms", "chat_corrections", "semantic_fallback",
+        "cli_info", "cli",
 #endif
     };
     int failed = 0;
