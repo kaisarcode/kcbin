@@ -208,7 +208,21 @@ test:
 			"$(BIN_DIR)/wasm/wasm32/libroute.a" \
 			"$(KCDIST_DIR)/libregex.c/wasm/wasm32/libregex.a" \
 			-sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 || exit 1; \
-		(cd "$(BUILD_DIR)/test-wasm" && "$$node" route-test.js); \
+		(cd "$(BUILD_DIR)/test-wasm" && "$node" route-test.js); \
+	elif [ -n "$(filter wine,$(MAKECMDGOALS))" ]; then \
+		command -v "$(WINE)" >/dev/null 2>&1 || { echo "route: missing Wine runtime $(WINE)" >&2; exit 1; }; \
+		command -v "$(WINE_X86_64_CC)" >/dev/null 2>&1 || { echo "route: missing Windows compiler $(WINE_X86_64_CC)" >&2; exit 1; }; \
+		$(MAKE) -s --no-print-directory windows/x86_64 || exit 1; \
+		mkdir -p "$(BUILD_DIR)/test-wine" || exit 1; \
+		"$(WINE_X86_64_CC)" -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
+			-I"$(KCDIST_DIR)/libhttp.c/windows/x86_64" \
+			-I"$(KCDIST_DIR)/libregex.c/windows/x86_64" \
+			-o "$(BUILD_DIR)/test-wine/route-test.exe" src/test.c \
+			"$(BIN_DIR)/windows/x86_64/libroute.a" \
+			"$(KCDIST_DIR)/libregex.c/windows/x86_64/libregex.a" || exit 1; \
+		cp "$(BIN_DIR)/windows/x86_64/route.exe" \
+			"$(BUILD_DIR)/test-wine/route.exe" || exit 1; \
+		(cd "$(BUILD_DIR)/test-wine" && WINEDEBUG=-all "$(WINE)" route-test.exe); \
 	else \
 		$(MAKE) -s --no-print-directory "$(NATIVE_TARGET)" || exit 1; \
 		mkdir -p "$(BUILD_DIR)/test" || exit 1; \
@@ -222,6 +236,13 @@ test:
 			"$(BUILD_DIR)/test/route" || exit 1; \
 		(cd "$(BUILD_DIR)/test" && ./route-test); \
 	fi
+
+wine:
+	@if [ -z "$(filter test,$(MAKECMDGOALS))" ]; then \
+		echo "Use 'make test wine' to run tests through Wine." >&2; \
+		exit 1; \
+	fi
+	@:
 
 wasm:
 	@if [ -z "$(filter test,$(MAKECMDGOALS))" ]; then \
