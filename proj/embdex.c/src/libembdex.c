@@ -3117,6 +3117,32 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
                     evidence[i].mapped_full_phrase)
                     literal_sufficient = 1;
         }
+        /*
+         * An exact translated term already covers a useful candidate
+         * set when enough distinct IDs share it. Avoid embedding a chat
+         * sentence only because the surrounding words are not indexed.
+         */
+        if (!literal_sufficient && index->mapped_lexical != NULL &&
+            mapped_query != NULL && strcmp(query, mapped_query) != 0)
+        {
+            size_t distinct = 0;
+
+            for (size_t i = 0; i < index->count && distinct < limit; i++) {
+                int repeated = 0;
+
+                if (evidence[i].mapped_hits == 0) continue;
+                for (size_t j = 0; j < i; j++) {
+                    if (evidence[j].mapped_hits != 0 &&
+                        strcmp(index->records[i].id,
+                            index->records[j].id) == 0) {
+                        repeated = 1;
+                        break;
+                    }
+                }
+                if (!repeated) distinct++;
+            }
+            if (distinct >= limit) literal_sufficient = 1;
+        }
         if (tokens.truncated || !literal_sufficient) {
             for (size_t variant = 0; variant < variants; variant++) {
                 double candidate_floor;
