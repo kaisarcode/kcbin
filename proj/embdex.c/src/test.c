@@ -29,7 +29,7 @@
 #ifdef __EMSCRIPTEN__
 #define KC_TEST_TOTAL 8
 #else
-#define KC_TEST_TOTAL 13
+#define KC_TEST_TOTAL 14
 #endif
 
 static int kc_test_current = 0;
