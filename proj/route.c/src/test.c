@@ -275,7 +275,7 @@ static int kc_test_cli(void)
     failed = kc_test_command(KC_TEST_CLI
         " match GET /notes/42 -r GET " KC_TEST_PATTERN " item"
         " > route-test.json") != 0;
-    input = fopen("route-test.json", "rb");
+    input = fopen("route-test.json", "r");
     if (!input) return 1;
     failed |= fgets(buffer, sizeof(buffer), input) == NULL;
     failed |= strstr(buffer, "\"id\":\"item\"") == NULL;
@@ -298,7 +298,7 @@ static int kc_test_cli_errors(void)
     failed = kc_test_command(KC_TEST_CLI
         " match GET /not-found -r GET /found found"
         " > route-test.json") != 0;
-    input = fopen("route-test.json", "rb");
+    input = fopen("route-test.json", "r");
     if (!input) return 1;
     failed |= fgets(buffer, sizeof(buffer), input) == NULL;
     failed |= strcmp(buffer, "null\n") != 0;
