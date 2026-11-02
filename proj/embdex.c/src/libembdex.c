@@ -2012,6 +2012,200 @@ static int kc_embdex_fuzzy_visit(const char *term, size_t document_count,
 }
 
 /**
+ * Check that a candidate is a complete dictionary source.
+ * @return Nonzero for a known source term.
+ */
+static int kc_embdex_source_exists(const kc_embdex_t *index,
+    const char *word)
+{
+    size_t first, alternatives, size = strlen(word);
+
+    return index->word_count != 0 &&
+        kc_embdex_term_match(index, word, size, 0,
+            &first, &alternatives) == size;
+}
+
+/**
+ * Count lexical postings without allocating result evidence.
+ * @return Zero to visit all postings.
+ */
+static int kc_embdex_count_posting(size_t ordinal, size_t frequency,
+    void *userdata)
+{
+    size_t *found = (size_t *)userdata;
+
+    (void)ordinal;
+    (void)frequency;
+    (*found)++;
+    return 0;
+}
+
+/**
+ * Validate a correction against actual searchable words.
+ * @return Nonzero when the dictionary or corpus contains the word.
+ */
+static int kc_embdex_word_exists(const kc_embdex_t *index,
+    const char *word)
+{
+    size_t found = 0;
+
+    if (kc_embdex_source_exists(index, word)) return 1;
+    return kc_bm25_postings(index->lexical, word,
+        kc_embdex_count_posting, &found) == KC_BM25_OK && found != 0;
+}
+
+/**
+ * Correct unknown query words before translating the query. Collapse runs
+ * of three or more identical ASCII letters only if the resulting word is
+ * indexed. Otherwise try a unique nearest dictionary source by Levenshtein.
+ * Keep original text for ambiguous or unmatched words.
+ * @return KC_EMBDEX_OK, or an allocation error.
+ */
+static int kc_embdex_correct_query(const kc_embdex_t *index,
+    const char *query, char **output)
+{
+    size_t size = strlen(query), offset = 0, used = 0, capacity = 0;
+    char *corrected = NULL;
+    int status = KC_EMBDEX_OK;
+
+    *output = NULL;
+    while (offset < size) {
+        size_t start = offset, end;
+        char *word = NULL, *folded = NULL, *candidate = NULL;
+        const char *chosen = NULL;
+        size_t length, maximum, best, matches;
+        int has_repetition = 0;
+
+        if (!kc_embdex_term_is_word(kc_embdex_codepoint(query, offset))) {
+            size_t step = 1;
+
+            while (offset + step < size &&
+                ((unsigned char)query[offset + step] & 0xc0U) == 0x80U)
+                step++;
+            status = kc_embdex_word_append(&corrected, &used, &capacity,
+                query + offset, step);
+            if (status != KC_EMBDEX_OK) goto correction_finished;
+            offset += step;
+            continue;
+        }
+        while (offset < size &&
+            kc_embdex_term_is_word(kc_embdex_codepoint(query, offset))) {
+            offset++;
+            while (offset < size &&
+                ((unsigned char)query[offset] & 0xc0U) == 0x80U)
+                offset++;
+        }
+        end = offset;
+        length = end - start;
+        word = (char *)malloc(length + 1);
+        if (word == NULL) {
+            status = KC_EMBDEX_ENOMEM;
+            goto correction_finished;
+        }
+        memcpy(word, query + start, length);
+        word[length] = '\0';
+        folded = kc_embdex_term_fold(word);
+        if (folded == NULL) {
+            free(word);
+            status = KC_EMBDEX_ENOMEM;
+            goto correction_finished;
+        }
+        if (!kc_embdex_word_exists(index, folded)) {
+            /*
+             * Try both one and two copies: legitimate doubled letters
+             * must remain available (e.g. English "letter").
+             */
+            for (size_t keep = 1; keep <= 2 && chosen == NULL; keep++) {
+                size_t written = 0;
+
+                free(candidate);
+                candidate = (char *)malloc(length + 1);
+                if (candidate == NULL) {
+                    status = KC_EMBDEX_ENOMEM;
+                    break;
+                }
+                for (size_t i = 0; i < length;) {
+                    size_t run = 1;
+
+                    while (i + run < length &&
+                        (unsigned char)folded[i] < 128 &&
+                        ((folded[i] >= 'a' && folded[i] <= 'z') ||
+                         (folded[i] >= '0' && folded[i] <= '9')) &&
+                        folded[i + run] == folded[i])
+                        run++;
+                    if (run >= 3) {
+                        size_t copies = keep;
+
+                        has_repetition = 1;
+                        while (copies-- > 0)
+                            candidate[written++] = folded[i];
+                    } else {
+                        memcpy(candidate + written, folded + i, run);
+                        written += run;
+                    }
+                    i += run;
+                }
+                candidate[written] = '\0';
+                if (has_repetition &&
+                    kc_embdex_word_exists(index, candidate))
+                    chosen = candidate;
+            }
+            if (status == KC_EMBDEX_OK && chosen == NULL &&
+                index->word_count != 0 && length >= 5 && length <= 24 &&
+                !has_repetition)
+            {
+                maximum = length >= 8 ? 2 : 1;
+                best = maximum + 1;
+                matches = 0;
+                for (size_t i = 0; i < index->word_count; i++) {
+                    const char *source = index->wordmap[i].source;
+                    size_t distance = 0, source_length;
+
+                    if (i != 0 &&
+                        strcmp(source, index->wordmap[i - 1].source) == 0)
+                        continue;
+                    if (strchr(source, ' ') != NULL) continue;
+                    source_length = kc_embdex_length(source);
+                    if (source_length > length + maximum ||
+                        length > source_length + maximum) continue;
+                    if (kc_leven_distance(folded, source, &maximum,
+                        &distance) != KC_LEVEN_OK)
+                        continue;
+                    if (distance == 0 || distance > best) continue;
+                    if (distance < best) {
+                        best = distance;
+                        matches = 0;
+                    }
+                    matches++;
+                    if (matches == 1) chosen = source;
+                    else chosen = NULL;
+                }
+            }
+        }
+        if (status == KC_EMBDEX_OK) {
+            const char *replacement = chosen == NULL ? word : chosen;
+
+            status = kc_embdex_word_append(&corrected, &used, &capacity,
+                replacement, strlen(replacement));
+        }
+        free(candidate);
+        free(folded);
+        free(word);
+        if (status != KC_EMBDEX_OK) goto correction_finished;
+    }
+    if (corrected == NULL) {
+        corrected = kc_embdex_copy_string(query);
+        if (corrected == NULL) status = KC_EMBDEX_ENOMEM;
+    }
+correction_finished:
+    if (status == KC_EMBDEX_OK)
+        *output = corrected;
+    else
+        free(corrected);
+    return status;
+}
+
+/**
  * Determine whether a normalized document contains a complete word span.
  * @param document Space-separated normalized document.
  * @param phrase Text bytes for a normalized word sequence.
@@ -2563,6 +2757,8 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     char *folded_mapped_query = NULL;
     char *mapped_query = NULL;
     char *symbol_query = NULL;
+    char *corrected_query = NULL;
+    const char *original_query = query;
     const char *search_query = query;
     float *embedding = NULL;
     size_t dimension = 0, limit = 10, window, lexical_count = 0;
@@ -2587,6 +2783,11 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
     if (index->count > SIZE_MAX / sizeof(*evidence) ||
         index->count > SIZE_MAX / sizeof(*ranks))
         return KC_EMBDEX_ENOMEM;
+
+    status = kc_embdex_correct_query(index, query, &corrected_query);
+    if (status != KC_EMBDEX_OK) return status;
+    query = corrected_query;
+    search_query = query;
 
     evidence = (kc_embdex_evidence_t *)calloc(index->count,
         sizeof(*evidence));
@@ -3173,7 +3374,7 @@ int kc_embdex_search(const kc_embdex_t *index, const char *query,
 
 finished:
     if (status == KC_EMBDEX_OK && evidence != NULL && tokens.count > 0)
-        kc_embdex_trace(index, query, evidence, index->count,
+        kc_embdex_trace(index, original_query, evidence, index->count,
             semantic_only_floor, variant_scores, unique_variants, variants,
             variants);
     kc_bm25_free(lexical);
@@ -3187,6 +3388,7 @@ finished:
     free(folded_mapped_query);
     free(mapped_query);
     free(symbol_query);
+    free(corrected_query);
     for (size_t i = 0; i < KC_EMBDEX_VARIANTS; i++)
         free(variant_text[i]);
     free(variant_scores);
