@@ -1,38 +1,40 @@
 # C API
 
-`route` maintains an ordered registry of HTTP methods and path expressions. It is independent of sockets, response writing, template rendering and the process that receives a request.
+`route` maintains an ordered registry of HTTP methods and path expressions. It selects destinations without implementing sockets, HTTP responses or application commands. Its compiled-pattern engine comes from the independent kclib `libregex.c`.
 
 ## Registry
 
-`kc_route_open()` allocates an empty registry. `kc_route_add()` records an HTTP method, a portable route expression, a destination identifier and an optional callback. Registrations are checked in insertion order. The special method `ALL` matches any request method. Every pattern matches the complete canonical path, not a substring.
+`kc_route_open()` allocates an empty registry. `kc_route_add()` records an HTTP method, a `libregex` pattern, an ID and an optional callback. Pattern compilation happens at registration time, and each entry owns its compiled regex until `kc_route_close()`.
 
-`kc_route_run()` takes a method and origin-form target, normalizes repeated and trailing slashes, separates the query, and visits matching registrations. Callback data, including captured groups, is borrowed only during callback execution. Returning zero continues to the next registration; returning nonzero accepts it and stops. A null callback accepts immediately. `matched` is set to zero when no handler accepts the request.
+Registrations are checked in insertion order. The special method `ALL` accepts any request method, and method matching is case-insensitive. Each pattern must match the **entire canonical path**; the query string is not part of the match.
 
-`kc_route_http()` adapts a borrowed `kc_http_request_t` from `libhttp.c` to the same routing operation. `kc_route_close()` releases the registry and compiled expressions. The caller owns callback context for as long as registered callbacks can execute.
+`kc_route_run()` takes a method and origin-form target, normalizes repeated and trailing slashes, separates the query and checks matching registrations. A callback that returns zero declines a match and allows subsequent routes; a nonzero result accepts the match and stops routing. An omitted callback accepts immediately.
 
-## Patterns and paths
+`kc_route_http()` takes a borrowed `kc_http_request_t` from `libhttp.c` and delegates to the same operation. The `matched` output is set to zero when no registered route accepts the request.
 
-The first capture is the first parenthesized group in the expression; up to 16 captures are returned. Matching uses POSIX extended regex syntax, which differs from PHP PCRE in some constructs. Patterns must not include delimiters. The portable matcher supports literals, escaped characters, byte classes and ranges, `.`, capturing groups, alternation (`|`) and the `*`, `+`, `?` quantifiers. It matches the entire path implicitly. Explicit `^` and `# C API
+## Pattern matching and captures
 
-`route` maintains an ordered registry of HTTP methods and path expressions. It is independent of sockets, response writing, template rendering and the process that receives a request.
+Matching uses `kc_regex_open()` and `kc_regex_match()` from `libregex.c`; `route` contains no regex parser, interpreter or system-`regex.h` fallback.
 
-## Registry
+Up to 16 capturing groups are delivered as borrowed strings through the callback. Group zero (the entire match) is not included in the callback's `captures` array. Optional groups that did not participate are represented by empty strings. The canonical path, query string, ID and captures are valid only during the callback.
 
-`kc_route_open()` allocates an empty registry. `kc_route_add()` records an HTTP method, a portable route expression, a destination identifier and an optional callback. Registrations are checked in insertion order. The special method `ALL` matches any request method. Every pattern matches the complete canonical path, not a substring.
+For syntax, supported operators, pattern limits and unsupported PCRE features, consult [libregex syntax and limitations](https://kaisarcode.com/kclib/regex), or the [upstream source documentation](https://github.com/kaisarcode/kclib/blob/master/proj/libregex.c/doc/syntax.md). No regular-expression behavior is reimplemented in `route`.
 
-`kc_route_run()` takes a method and origin-form target, normalizes repeated and trailing slashes, separates the query, and visits matching registrations. Callback data, including captured groups, is borrowed only during callback execution. Returning zero continues to the next registration; returning nonzero accepts it and stops. A null callback accepts immediately. `matched` is set to zero when no handler accepts the request.
+## Errors and ownership
 
-`kc_route_http()` adapts a borrowed `kc_http_request_t` from `libhttp.c` to the same routing operation. `kc_route_close()` releases the registry and compiled expressions. The caller owns callback context for as long as registered callbacks can execute.
+`KC_ROUTE_OK` means the routing operation was evaluated successfully, including when no route was accepted. `KC_ROUTE_EPATTERN` reports a rejected pattern during registration. Other failures include `KC_ROUTE_EINVAL` (invalid arguments), `KC_ROUTE_ENOMEM` (allocation failure), `KC_ROUTE_EURI` (invalid request target) and `KC_ROUTE_ELIMIT` (the regex matching budget was exceeded).
 
-## Patterns and paths
+A regex error other than `KC_REGEX_NOMATCH` stops dispatch and propagates through the corresponding route error; it does not silently fall back to another route. On failure, the registry remains owned by the caller and is released with `kc_route_close()`.
 
-The first capture is the first parenthesized group in the expression; up to 16 captures are returned. Matching uses POSIX extended regex syntax, which differs from PHP PCRE in some constructs.  anchors, counted repeats and PCRE extensions are not supported; this is not full PHP/PCRE compatibility. Patterns and work are bounded to avoid uncontrolled matching.
+The route registry owns copied method strings, IDs and compiled expressions. The caller retains ownership of callback userdata for the lifetime of registrations.
 
-The path is normalized before matching, while the query remains separate and unchanged. This tool does not issue the canonical HTTP 301 redirect in `Route.php`; redirect policy belongs to the HTTP response composition. It does not decode percent-encoded segments or authorize filesystem access. Applications serving files must independently validate and confine paths.
+## Paths and HTTP
+
+The input path is normalized before matching, while the query is preserved. `route` does not issue the canonical HTTP 301 redirect of the original PHP `Route.php`; that policy belongs to HTTP response composition. No percent-decoding, filesystem authorization or path confinement is performed here. A file-serving consumer must validate access independently.
 
 ## JavaScript API projection
 
-The intended JavaScript projection maps `Route.add()`, `Route.get()`, `Route.post()`, `Route.put()`, `Route.delete()` and `Route.all()` to the same native registry operations and callback continuation semantics. This document describes the intended projection; it does not claim a JavaScript binding has already been implemented.
+The intended public JavaScript projection maps `Route.add()`, `Route.get()`, `Route.post()`, `Route.put()`, `Route.delete()` and `Route.all()` to the same native registration and callback semantics. This is an API projection only, not an independent JavaScript implementation or a claim that a binding exists.
 
 ## Next step
 
