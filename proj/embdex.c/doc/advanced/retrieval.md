@@ -15,9 +15,14 @@ Search combines these independent retrieval mechanisms:
 - BM25 ranks matching tokens from the query and provides indexed postings.
 - UTF-8 dictionary source and target terms are validated independently of BM25;
     their recognition preserves words, punctuation, numbers, and symbols.
-- Unmatched terms may be compared with indexed words by bounded Unicode
-    Levenshtein distance. Short terms and ambiguous single-word corrections
-    are rejected.
+- Before lookup, unknown query words may be corrected against dictionary
+    sources and indexed corpus words. Three or more repeated ASCII letters
+    can be reduced to one or two only when the result exists in a searchable
+    vocabulary. Unique dictionary-source spelling corrections use bounded
+    Levenshtein distance. The existing corpus-vocabulary Levenshtein retrieval
+    remains available for terms not otherwise matched.
+- Morphological variants and regional expressions belong in the dictionary;
+    this correction does not apply language-specific stemming rules.
 - libngram finds complete normalized phrases and overlapping word windows.
 - libemb obtains one embedding for queries requiring semantic retrieval.
     Cosine similarity scans small indexes directly; HNSW handles larger ones.
@@ -79,7 +84,9 @@ the query with several independent associations does not stop semantic
 retrieval: those matches may explain individual terms without finding
 other relevant associations. The covering still contributes to ranking.
 
-A query with unmatched words also triggers semantic inference. Truncated
+A query with unmatched words may still avoid embeddings when translated
+lexical evidence already finds at least the requested number of distinct
+candidate IDs. Otherwise semantic retrieval remains available. Truncated
 lexical queries conservatively continue to semantic inference. The
 diagnostic trace reports `variants_evaluated: 0` when embeddings were
 skipped and a positive count when inference ran.
