@@ -125,7 +125,7 @@ $(2)/$(1):
 	@$(MAKE) -s --no-print-directory build-target TARGET=$(2)/$(1) \
 		TARGET_CC="$(OSXCROSS_ROOT)/bin/$(3)" \
 		TARGET_AR="$(OSXCROSS_ROOT)/bin/$(4)-apple-darwin25.1-ar" \
-		TARGET_EXT=dylib TARGET_CFLAGS="-fPIC -isysroot $(5)" \
+		TARGET_EXT=dylib TARGET_CFLAGS="-fPIC -isysroot $(5) -Wno-unused-command-line-argument" \
 		TARGET_SHARED="-dynamiclib -isysroot $(5)" TARGET_LIBRARY_ONLY=1 \
 		TARGET_SDK="$(5)"
 endef
