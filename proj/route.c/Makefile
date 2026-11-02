@@ -208,7 +208,7 @@ test:
 			"$(BIN_DIR)/wasm/wasm32/libroute.a" \
 			"$(KCDIST_DIR)/libregex.c/wasm/wasm32/libregex.a" \
 			-sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 || exit 1; \
-		(cd "$(BUILD_DIR)/test-wasm" && "$node" route-test.js); \
+		(cd "$(BUILD_DIR)/test-wasm" && "$$node" route-test.js); \
 	elif [ -n "$(filter wine,$(MAKECMDGOALS))" ]; then \
 		command -v "$(WINE)" >/dev/null 2>&1 || { echo "route: missing Wine runtime $(WINE)" >&2; exit 1; }; \
 		command -v "$(WINE_X86_64_CC)" >/dev/null 2>&1 || { echo "route: missing Windows compiler $(WINE_X86_64_CC)" >&2; exit 1; }; \
