@@ -19,7 +19,11 @@
 #define KC_TEST_CLI "./route"
 #endif
 
+#ifdef __EMSCRIPTEN__
 #define KC_TEST_TOTAL 11
+#else
+#define KC_TEST_TOTAL 13
+#endif
 
 static int kc_test_current;
 static int kc_test_failed;
@@ -245,6 +249,7 @@ static int kc_test_invalid(void)
     return failed;
 }
 
+#ifndef __EMSCRIPTEN__
 /**
  * Exercise the released CLI through the shell.
  * @param command CLI invocation.
@@ -305,6 +310,8 @@ static int kc_test_cli_errors(void)
     return failed;
 }
 
+#endif
+
 /**
  * Verify portable alternation, classes and repeated groups.
  * @return Nonzero when a representative portable expression fails.
@@ -332,6 +339,57 @@ static int kc_test_portable(void)
 }
 
 /**
+ * Verify an unmatched optional group is delivered as an empty capture.
+ * @return Nonzero when optional captures or byte ranges are misinterpreted.
+ */
+static int kc_test_optional(void)
+{
+    kc_route_t *route = NULL;
+    kc_test_state_t state = {"optional", "/notes/b", NULL, "",
+        0U, 0, 1};
+    int found = 0, failed = 0;
+
+    failed |= kc_route_open(&route) != KC_ROUTE_OK;
+    if (!failed) {
+        failed |= kc_route_add(route, "GET", "/notes/(a)?b", "optional",
+            kc_test_receive, &state) != KC_ROUTE_OK;
+        failed |= kc_route_run(route, "GET", "/notes/b",
+            &found) != KC_ROUTE_OK;
+        failed |= found != 1 || !state.valid || state.visits != 1U;
+    }
+    kc_route_close(route);
+    return failed;
+}
+
+/**
+ * Verify regex evaluation-limit errors abort dispatch instead of falling back.
+ * @return Nonzero when the matching limit is suppressed.
+ */
+static int kc_test_limit(void)
+{
+    kc_route_t *route = NULL;
+    char target[262];
+    int found = 0, failed = 0;
+
+    target[0] = '/';
+    memset(target + 1U, 'a', sizeof(target) - 2U);
+    target[sizeof(target) - 1U] = '\0';
+    failed |= kc_route_open(&route) != KC_ROUTE_OK;
+    if (!failed) {
+        failed |= kc_route_add(route, "GET", "/(a+)+b", "slow",
+            NULL, NULL) != KC_ROUTE_OK;
+        failed |= kc_route_add(route, "ALL", "/.*", "fallback",
+            NULL, NULL) != KC_ROUTE_OK;
+        failed |= kc_route_run(route, "GET", target,
+            &found) != KC_ROUTE_ELIMIT;
+        failed |= found != 0;
+        failed |= strstr(kc_route_strerror(KC_ROUTE_ELIMIT), "limit") == NULL;
+    }
+    kc_route_close(route);
+    return failed;
+}
+
+/**
  * Execute the named contract cases.
  * @return Zero when every case passes.
  */
@@ -353,12 +411,18 @@ int main(void)
         kc_test_uri());
     kc_test_result("invalid", "validates input and handles empty cleanup",
         kc_test_invalid());
+#ifndef __EMSCRIPTEN__
     kc_test_result("cli", "prints selected route and captures as JSON",
         kc_test_cli());
     kc_test_result("cli_errors", "reports null matches and rejects bad syntax",
         kc_test_cli_errors());
+#endif
     kc_test_result("portable", "matches alternation, classes and repeats",
         kc_test_portable());
+    kc_test_result("optional", "returns empty captures for unmatched groups",
+        kc_test_optional());
+    kc_test_result("limit", "propagates regex budget failures without fallback",
+        kc_test_limit());
     printf("%d passed, %d failed\n",
         kc_test_current - kc_test_failed, kc_test_failed);
     return kc_test_failed ? 1 : 0;
