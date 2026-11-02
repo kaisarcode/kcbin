@@ -109,7 +109,6 @@ define android_target
 android/$(1):
 	@$(MAKE) -s --no-print-directory build-target TARGET=android/$(1) \
 		TARGET_CC="$(NDK_BIN)/$(2)$(ANDROID_API)-clang" \
-		\
 		TARGET_AR="$(NDK_BIN)/llvm-ar" \
 		TARGET_EXT=so TARGET_CFLAGS="-fPIC" TARGET_SHARED="-shared" \
 		TARGET_SYSTEM_LIBS="-ldl -lm"
@@ -140,7 +139,7 @@ wasm/wasm32:
 		TARGET_CC="$(WASM_EMCC)" \
 		TARGET_AR="$(WASM_EMAR)" \
 		TARGET_EXT=wasm TARGET_CFLAGS="" TARGET_SYSTEM_LIBS="-lm" \
-		TARGET_SHARED="--no-entry -sSTANDALONE_WASM=1 -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 -sEXPORTED_FUNCTIONS=_kc_route_build,_kc_route_build_with_dictionaries,_kc_route_open,_kc_route_search,_kc_route_close,_kc_route_strerror,_kc_route_version"
+		TARGET_SHARED="--no-entry -sSTANDALONE_WASM=1 -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 -sEXPORTED_FUNCTIONS=_kc_route_open,_kc_route_add,_kc_route_run,_kc_route_http,_kc_route_close,_kc_route_strerror,_kc_route_version"
 
 DEP_DIR = $(KCDIST_DIR)/libhttp.c/$(TARGET)
 DEP_HEADER = $(DEP_DIR)/libhttp.h
@@ -163,14 +162,11 @@ check-deps:
 build-target: check-deps
 	@mkdir -p "$(OUT_DIR)"
 	@$(MAKE) -s --no-print-directory "$(OUT_STATIC)" "$(OUT_PRODUCT)" \
+		$(if $(filter wasm/%,$(TARGET)),,$(if $(TARGET_LIBRARY_ONLY),,$(OUT_SHARED))) \
 		TARGET="$(TARGET)" TARGET_CC="$(TARGET_CC)" TARGET_AR="$(TARGET_AR)" \
 		TARGET_EXT="$(TARGET_EXT)" TARGET_CLI_EXT="$(TARGET_CLI_EXT)" \
 		TARGET_CFLAGS="$(TARGET_CFLAGS)" TARGET_SHARED="$(TARGET_SHARED)" \
 		KCDIST_DIR="$(KCDIST_DIR)" BUILD_VERSION="$(BUILD_VERSION)"
-	@$(if $(filter wasm/%,$(TARGET)),:,$(if $(TARGET_LIBRARY_ONLY),:,$(MAKE) -s --no-print-directory "$(OUT_SHARED)" \
-		TARGET="$(TARGET)" TARGET_CC="$(TARGET_CC)" TARGET_AR="$(TARGET_AR)" \
-		TARGET_EXT="$(TARGET_EXT)" TARGET_SHARED="$(TARGET_SHARED)" \
-		TARGET_CFLAGS="$(TARGET_CFLAGS)" KCDIST_DIR="$(KCDIST_DIR)"))
 	@echo "OK $(TARGET)"
 
 $(OUT_OBJECT): src/libroute.c src/libroute.h Makefile $(DEP_HEADER)
