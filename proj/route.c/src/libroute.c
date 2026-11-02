@@ -191,12 +191,16 @@ int kc_route_run(const kc_route_t *route, const char *method,
         for (i = 1U; i <= slots; ++i) {
             size_t width;
 
-            if (positions[i].rm_so < 0) break;
-            width = (size_t)(positions[i].rm_eo - positions[i].rm_so);
-            allocated[count] = (char *)malloc(width + 1U);
-            if (!allocated[count]) break;
-            memcpy(allocated[count], path + positions[i].rm_so, width);
-            allocated[count][width] = '\0';
+            if (positions[i].rm_so < 0) {
+                allocated[count] = kc_route_copy("");
+                if (!allocated[count]) break;
+            } else {
+                width = (size_t)(positions[i].rm_eo - positions[i].rm_so);
+                allocated[count] = (char *)malloc(width + 1U);
+                if (!allocated[count]) break;
+                memcpy(allocated[count], path + positions[i].rm_so, width);
+                allocated[count][width] = '\0';
+            }
             groups[count] = allocated[count];
             ++count;
         }
