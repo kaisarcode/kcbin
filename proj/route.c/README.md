@@ -6,21 +6,16 @@ Routes use the portable `libregex.c` API for compiled expressions, capture group
 
 ## Quick start
 
-Select a route directly:
+Send an HTTP request to a handler:
 
 ```sh
-route match GET '/notes/42?view=full' \
-    -r GET '/notes/([0-9]+)' note \
-    -r ALL '/.*' fallback
+printf 'GET /notes/42 HTTP/1.1\r\nHost: localhost\r\n\r\n' |
+    route -r GET '/notes/([0-9]+)' './handlers/note' \
+          -r ALL '/.*' './handlers/notfound'
 ```
 
-The result is one JSON object:
+The first matching command receives a complete HTTP request through stdin. It writes an HTTP response to stdout, which `route` forwards unchanged. Commands must be trusted, and handlers must generate valid HTTP responses. Invalid requests, unmatched routes and failing commands result in a nonzero exit status, not an automatically generated HTTP response. In a native HTTP server, call `kc_route_http()` from the `libhttp.c` request callback to avoid reparsing.
 
-```json
-{"id":"note","method":"GET","path":"/notes/42","query":"view=full","captures":["42"]}
-```
-
-Unmatched requests print `null`. The tool also supports repeated `--route` options. Patterns and IDs are configuration supplied by the caller; the CLI does not execute destination commands.
 
 ## Documentation
 
