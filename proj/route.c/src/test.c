@@ -14,11 +14,18 @@
 #include <string.h>
 
 #ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
+#ifdef _WIN32
 #define KC_TEST_CLI ".\\route.exe"
 #define KC_TEST_PATTERN "\"/notes/([0-9]+)\""
+#define KC_TEST_HANDLER "route-test.exe --echo"
 #else
 #define KC_TEST_CLI "./route"
 #define KC_TEST_PATTERN "'/notes/([0-9]+)'"
+#define KC_TEST_HANDLER "./route-test --echo"
 #endif
 
 #ifdef __EMSCRIPTEN__
@@ -312,15 +319,9 @@ static int kc_test_cli(void)
     int failed = kc_test_input();
 
     if (failed) return 1;
-#ifdef _WIN32
     failed |= kc_test_command(KC_TEST_CLI
-        " -r POST " KC_TEST_PATTERN " more"
-        " < route-test.http > route-test.out") != 0;
-#else
-    failed |= kc_test_command(KC_TEST_CLI
-        " -r POST " KC_TEST_PATTERN " cat"
-        " < route-test.http > route-test.out") != 0;
-#endif
+        " -r POST " KC_TEST_PATTERN " " KC_TEST_HANDLER
+        " < route-test.http > route-test.out 2> route-test.err") != 0;
     output = fopen("route-test.out", "rb");
     if (!output) failed = 1;
     else {
@@ -333,6 +334,7 @@ static int kc_test_cli(void)
     }
     remove("route-test.http");
     remove("route-test.out");
+    remove("route-test.err");
     return failed;
 }
 
@@ -444,11 +446,40 @@ static int kc_test_limit(void)
 }
 
 /**
- * Execute the named contract cases.
- * @return Zero when every case passes.
+ * Echo raw HTTP input as a deterministic executable handler.
+ * @return Zero if every byte was forwarded.
  */
-int main(void)
+static int kc_test_echo(void)
 {
+    unsigned char bytes[8192];
+    size_t count;
+
+#ifdef _WIN32
+    if (_setmode(_fileno(stdin), _O_BINARY) == -1 ||
+        _setmode(_fileno(stdout), _O_BINARY) == -1)
+        return 1;
+#endif
+    while ((count = fread(bytes, 1U, sizeof(bytes), stdin)) > 0U) {
+        if (fwrite(bytes, 1U, count, stdout) != count) return 1;
+    }
+    return ferror(stdin) || fflush(stdout) != 0 ? 1 : 0;
+}
+
+/**
+ * Execute the named contract cases or serve as an HTTP echo handler.
+ * @param argc Process argument count.
+ * @param argv Process argument vector.
+ * @return Zero when every case passes or raw input was echoed.
+ */
+int main(int argc, char **argv)
+{
+#ifndef __EMSCRIPTEN__
+    if (argc == 2 && strcmp(argv[1], "--echo") == 0)
+        return kc_test_echo();
+#else
+    (void)argc;
+    (void)argv;
+#endif
     kc_test_result("basic", "matches normalized root and preserves query",
         kc_test_basic());
     kc_test_result("capture", "delivers regex captures from canonical URI",
