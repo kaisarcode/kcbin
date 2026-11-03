@@ -1,8 +1,8 @@
 # route.c - HTTP route selection
 
-`route` matches request methods and normalized URI paths against ordered patterns. It selects a destination without opening sockets, sending HTTP responses or running application commands.
+`route` matches request methods and normalized URI paths against ordered patterns. Its native API dispatches parsed requests to callbacks. Its CLI reads HTTP requests from stdin and invokes the command registered for each matching route, without opening sockets.
 
-Routes use the portable `libregex.c` API for compiled expressions, capture groups and full-path matching. A callback can accept a match or return zero to continue to the next registered route. The caller decides how to execute a selected destination. The core uses the structured request type of `libhttp.c` and composes `libregex.c` without modifying either library.
+Routes use the portable `libregex.c` API for compiled expressions, capture groups and full-path matching. A callback can accept a match or return zero to continue to the next registered route. The C callback receives the complete borrowed `kc_http_request_t` alongside match captures. The CLI uses `libhttp.c` to parse incoming HTTP requests and `libregex.c` to match paths. Neither dependency is modified.
 
 ## Quick start
 
