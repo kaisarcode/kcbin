@@ -29,6 +29,7 @@ extern "C" {
 typedef struct kc_route kc_route_t;
 
 typedef struct {
+    const kc_http_request_t *request;
     const char *method;
     const char *path;
     const char *query;
@@ -40,7 +41,7 @@ typedef struct {
 /**
  * Process a matching route. All pointers remain borrowed until return.
  * Return zero to check the next route, or nonzero to accept the match.
- * @param match Borrowed method, canonical path, query, route ID, and captures.
+ * @param match Borrowed request (if supplied), canonical path, route ID, and captures.
  * @param userdata Callback context owned by the caller.
  * @return Zero to continue, nonzero to stop routing.
  */
@@ -82,7 +83,7 @@ int kc_route_run(const kc_route_t *route, const char *method,
     const char *target, int *matched);
 
 /**
- * Route one parsed HTTP request through its method and target.
+ * Route one parsed HTTP request and expose it to matching callbacks.
  * @param route Registry to search.
  * @param request Borrowed request supplied by libhttp.
  * @param matched Receives one when an entry accepts the request.
