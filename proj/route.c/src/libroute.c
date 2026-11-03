@@ -161,8 +161,8 @@ int kc_route_add(kc_route_t *route, const char *method, const char *pattern,
  * @param matched Receives accepted-match indicator.
  * @return Route status code.
  */
-int kc_route_run(const kc_route_t *route, const char *method,
-    const char *target, int *matched)
+static int kc_route_dispatch(const kc_route_t *route, const char *method,
+    const char *target, const kc_http_request_t *request, int *matched)
 {
     kc_route_entry_t *entry;
     char *path = NULL, *query = NULL;
@@ -221,6 +221,7 @@ int kc_route_run(const kc_route_t *route, const char *method,
             free(query);
             return KC_ROUTE_ENOMEM;
         }
+        match.request = request;
         match.method = method;
         match.path = path;
         match.query = query;
@@ -241,6 +242,20 @@ int kc_route_run(const kc_route_t *route, const char *method,
 }
 
 /**
+ * Route a method and origin-form target without a parsed request.
+ * @param route Registry to search.
+ * @param method HTTP method.
+ * @param target Origin-form request target.
+ * @param matched Receives accepted-match indicator.
+ * @return Route status code.
+ */
+int kc_route_run(const kc_route_t *route, const char *method,
+    const char *target, int *matched)
+{
+    return kc_route_dispatch(route, method, target, NULL, matched);
+}
+
+/**
  * Dispatch a libhttp request without retaining its borrowed fields.
  * @param route Registry.
  * @param request Borrowed parsed HTTP request.
@@ -251,7 +266,8 @@ int kc_route_http(const kc_route_t *route, const kc_http_request_t *request,
     int *matched)
 {
     if (!request) return KC_ROUTE_EINVAL;
-    return kc_route_run(route, request->method, request->target, matched);
+    return kc_route_dispatch(route, request->method, request->target,
+        request, matched);
 }
 
 /**
