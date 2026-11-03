@@ -167,6 +167,21 @@ static int kc_test_method(void)
 }
 
 /**
+ * Verify a parsed HTTP request remains available to the routed handler.
+ * @param match Borrowed route and HTTP request.
+ * @param userdata Expected request address.
+ * @return One when the complete request is preserved.
+ */
+static int kc_test_http_handler(const kc_route_match_t *match, void *userdata)
+{
+    const kc_http_request_t *request = (const kc_http_request_t *)userdata;
+
+    return match->request == request && match->request->body_size == 4U &&
+        memcmp(match->request->body, "test", 4U) == 0 &&
+        match->request->header_count == 1U;
+}
+
+/**
  * Verify a normalized path never loses a route's accepted identity.
  * @return Nonzero on assertion failure.
  */
@@ -176,12 +191,18 @@ static int kc_test_http(void)
     kc_http_request_t request = {0};
     int found = 0, failed = 0;
 
+    kc_http_field_t headers[] = {{"content-type", "text/plain"}};
+
     request.method = "GET";
     request.target = "/assets/app.js?x=1";
+    request.headers = headers;
+    request.header_count = 1U;
+    request.body = "test";
+    request.body_size = 4U;
     failed |= kc_route_open(&route) != KC_ROUTE_OK;
     if (!failed) {
         failed |= kc_route_add(route, "GET", "/assets/.*", "asset",
-            NULL, NULL) != KC_ROUTE_OK;
+            kc_test_http_handler, &request) != KC_ROUTE_OK;
         failed |= kc_route_http(route, &request, &found) != KC_ROUTE_OK;
         failed |= found != 1;
     }
@@ -263,52 +284,83 @@ static int kc_test_command(const char *command)
 }
 
 /**
- * Verify CLI JSON output with captures and method.
- * @return Nonzero on assertion failure.
+ * Write an HTTP request fixture with a body.
+ * @return Zero when the fixture was written.
  */
-static int kc_test_cli(void)
+static int kc_test_input(void)
 {
-    FILE *input;
-    char buffer[512] = {0};
+    const char wire[] = "POST /notes/42?view=full HTTP/1.1\r\n"
+        "Host: localhost\r\nContent-Length: 4\r\n\r\ntest";
+    FILE *file = fopen("route-test.http", "wb");
     int failed;
 
-    failed = kc_test_command(KC_TEST_CLI
-        " match GET /notes/42 -r GET " KC_TEST_PATTERN " item"
-        " > route-test.json") != 0;
-    input = fopen("route-test.json", "r");
-    if (!input) return 1;
-    failed |= fgets(buffer, sizeof(buffer), input) == NULL;
-    failed |= strstr(buffer, "\"id\":\"item\"") == NULL;
-    failed |= strstr(buffer, "\"captures\":[\"42\"]") == NULL;
-    fclose(input);
-    remove("route-test.json");
+    if (!file) return 1;
+    failed = fwrite(wire, 1U, sizeof(wire) - 1U, file) !=
+        sizeof(wire) - 1U;
+    failed |= fclose(file) != 0;
     return failed;
 }
 
 /**
- * Verify malformed CLI invocations fail and unmatched requests emit null.
+ * Verify stdin HTTP parsing and execution of a matching handler.
+ * @return Nonzero on assertion failure.
+ */
+static int kc_test_cli(void)
+{
+    FILE *output;
+    char buffer[512] = {0};
+    int failed = kc_test_input();
+
+    if (failed) return 1;
+#ifdef _WIN32
+    failed |= kc_test_command(KC_TEST_CLI
+        " -r POST " KC_TEST_PATTERN " more"
+        " < route-test.http > route-test.out") != 0;
+#else
+    failed |= kc_test_command(KC_TEST_CLI
+        " -r POST " KC_TEST_PATTERN " cat"
+        " < route-test.http > route-test.out") != 0;
+#endif
+    output = fopen("route-test.out", "rb");
+    if (!output) failed = 1;
+    else {
+        size_t count = fread(buffer, 1U, sizeof(buffer) - 1U, output);
+
+        failed |= count == 0U;
+        failed |= strstr(buffer, "POST /notes/42?view=full HTTP/1.1") == NULL;
+        failed |= strstr(buffer, "test") == NULL;
+        fclose(output);
+    }
+    remove("route-test.http");
+    remove("route-test.out");
+    return failed;
+}
+
+/**
+ * Verify unmatched, malformed and empty HTTP streams fail.
  * @return Nonzero on assertion failure.
  */
 static int kc_test_cli_errors(void)
 {
-    FILE *input;
-    char buffer[32] = {0};
-    int failed;
+    int failed = kc_test_input();
 
-    failed = kc_test_command(KC_TEST_CLI
-        " match GET /not-found -r GET /found found"
-        " > route-test.json") != 0;
-    input = fopen("route-test.json", "r");
-    if (!input) return 1;
-    failed |= fgets(buffer, sizeof(buffer), input) == NULL;
-    failed |= strcmp(buffer, "null\n") != 0;
-    fclose(input);
-    remove("route-test.json");
+    if (failed) return 1;
 #ifdef _WIN32
-    failed |= kc_test_command(KC_TEST_CLI " match GET / -r GET > NUL 2>&1") == 0;
+    failed |= kc_test_command(KC_TEST_CLI
+        " -r GET /notes/42 more < route-test.http > NUL 2>&1") == 0;
+    failed |= kc_test_command(KC_TEST_CLI
+        " -r POST /notes/42 more < NUL > NUL 2>&1") == 0;
+    failed |= kc_test_command(KC_TEST_CLI
+        " -r POST > NUL 2>&1") == 0;
 #else
-    failed |= kc_test_command(KC_TEST_CLI " match GET / -r GET > /dev/null 2>&1") == 0;
+    failed |= kc_test_command(KC_TEST_CLI
+        " -r GET /notes/42 cat < route-test.http > /dev/null 2>&1") == 0;
+    failed |= kc_test_command(KC_TEST_CLI
+        " -r POST /notes/42 cat < /dev/null > /dev/null 2>&1") == 0;
+    failed |= kc_test_command(KC_TEST_CLI
+        " -r POST > /dev/null 2>&1") == 0;
 #endif
+    remove("route-test.http");
     return failed;
 }
 
@@ -414,9 +466,9 @@ int main(void)
     kc_test_result("invalid", "validates input and handles empty cleanup",
         kc_test_invalid());
 #ifndef __EMSCRIPTEN__
-    kc_test_result("cli", "prints selected route and captures as JSON",
+    kc_test_result("cli", "dispatches stdin HTTP request to a handler",
         kc_test_cli());
-    kc_test_result("cli_errors", "reports null matches and rejects bad syntax",
+    kc_test_result("cli_errors", "rejects unmatched requests and invalid input",
         kc_test_cli_errors());
 #endif
     kc_test_result("portable", "matches alternation, classes and repeats",
