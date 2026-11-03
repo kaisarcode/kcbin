@@ -8,9 +8,9 @@
 
 Registrations are checked in insertion order. The special method `ALL` accepts any request method, and method matching is case-insensitive. Each pattern must match the **entire canonical path**; the query string is not part of the match.
 
-`kc_route_run()` takes a method and origin-form target, normalizes repeated and trailing slashes, separates the query and checks matching registrations. A callback that returns zero declines a match and allows subsequent routes; a nonzero result accepts the match and stops routing. An omitted callback accepts immediately.
+`kc_route_run()` takes a method and origin-form target, normalizes repeated and trailing slashes, separates the query and checks matching registrations. A callback that returns zero declines a match and allows subsequent routes; a nonzero result accepts the match and stops routing. The callback match contains a borrowed `request` pointer when dispatch originated from `kc_route_http()`, and `NULL` for `kc_route_run()`. An omitted callback accepts immediately.
 
-`kc_route_http()` takes a borrowed `kc_http_request_t` from `libhttp.c` and delegates to the same operation. The `matched` output is set to zero when no registered route accepts the request.
+`kc_route_http()` takes a borrowed `kc_http_request_t` from `libhttp.c` and dispatches with the complete request available to handlers. It does not own, copy or reparse the request. The `matched` output is set to zero when no registered route accepts the request.
 
 ## Pattern matching and captures
 
