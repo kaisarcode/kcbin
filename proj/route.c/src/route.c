@@ -7,6 +7,10 @@
  * License: https://www.gnu.org/licenses/lgpl-3.0.html
  */
 
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "libroute.h"
 
 #include <stdio.h>
@@ -14,6 +18,8 @@
 #include <string.h>
 
 #ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
 #define route_popen _popen
 #define route_pclose _pclose
 #else
@@ -85,6 +91,9 @@ static int route_execute(const kc_route_match_t *match, void *userdata)
         state->failed = 1;
         return 1;
     }
+    #ifdef _WIN32
+    _setmode(_fileno(process), _O_BINARY);
+    #endif
     if (fwrite(bytes, 1U, size, process) != size) {
         fprintf(stderr, "route: cannot write handler input\n");
         state->failed = 1;
@@ -149,6 +158,10 @@ static int route_stream(route_state_t *state)
     size_t size;
     int status;
 
+    #ifdef _WIN32
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+    #endif
     status = kc_http_parser_open(&parser, route_request, NULL,
         route_error, state);
     if (status != KC_HTTP_OK) {
