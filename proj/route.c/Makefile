@@ -191,7 +191,7 @@ $(OUT_CLI): src/route.c $(OUT_STATIC) $(DEP_LIBS)
 	@$(TARGET_CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc $(DEP_INCLUDES) \
 		-c -o "$(BUILD_DIR)/$(TARGET)/route.o" src/route.c
 	@$(TARGET_CC) -o "$@" "$(BUILD_DIR)/$(TARGET)/route.o" \
-		"$(OUT_STATIC)" "$(DEP_REGEX)/libregex.a"
+		"$(OUT_STATIC)" "$(DEP_HTTP)/libhttp.a" "$(DEP_REGEX)/libregex.a"
 
 test:
 	@if [ -n "$(filter wasm,$(MAKECMDGOALS))" ]; then \
