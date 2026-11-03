@@ -1,6 +1,6 @@
-# route.c - HTTP route selection
+# route.c - HTTP router for libhttp.c
 
-`route` matches request methods and normalized URI paths against ordered patterns. Its native API dispatches parsed requests to callbacks. Its CLI reads HTTP requests from stdin and invokes the command registered for each matching route, without opening sockets.
+`route.c` is an HTTP router for KaisarCode's `libhttp.c`. It receives parsed `kc_http_request_t` requests, matches HTTP methods and URI paths against ordered patterns, and dispatches them to registered handlers. Its CLI also accepts HTTP requests through stdin and executes the command associated with each matching route, without opening sockets.
 
 Routes use the portable `libregex.c` API for compiled expressions, capture groups and full-path matching. A callback can accept a match or return zero to continue to the next registered route. The C callback receives the complete borrowed `kc_http_request_t` alongside match captures. The CLI uses `libhttp.c` to parse incoming HTTP requests and `libregex.c` to match paths. Neither dependency is modified.
 
