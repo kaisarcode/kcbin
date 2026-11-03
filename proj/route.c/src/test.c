@@ -445,6 +445,7 @@ static int kc_test_limit(void)
     return failed;
 }
 
+#ifndef __EMSCRIPTEN__
 /**
  * Echo raw HTTP input as a deterministic executable handler.
  * @return Zero if every byte was forwarded.
@@ -464,6 +465,8 @@ static int kc_test_echo(void)
     }
     return ferror(stdin) || fflush(stdout) != 0 ? 1 : 0;
 }
+
+#endif
 
 /**
  * Execute the named contract cases or serve as an HTTP echo handler.
