@@ -21,11 +21,11 @@
 #ifdef _WIN32
 #define KC_TEST_CLI ".\\route.exe"
 #define KC_TEST_PATTERN "\"/notes/([0-9]+)\""
-#define KC_TEST_HANDLER "route-test.exe --echo"
+#define KC_TEST_HANDLER "\"route-test.exe --echo\""
 #else
 #define KC_TEST_CLI "./route"
 #define KC_TEST_PATTERN "'/notes/([0-9]+)'"
-#define KC_TEST_HANDLER "./route-test --echo"
+#define KC_TEST_HANDLER "\"./route-test --echo\""
 #endif
 
 #ifdef __EMSCRIPTEN__
