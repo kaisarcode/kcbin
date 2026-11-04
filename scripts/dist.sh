@@ -261,13 +261,11 @@ prune_legacy_project() {
     local project_dir="$1" project_name name path
     project_name=$(basename "$project_dir")
     name=$(capability_name "$project_name")
-    for path in "$DIST_DIR/$project_name/manifest.json"; do
-        if [ -f "$path" ]; then
-            rm -rf "${DIST_DIR:?}/${project_name:?}"
-            CHANGED=1
-            PROJECT_CHANGED=1
-        fi
-    done
+    if [ -f "$DIST_DIR/$project_name/manifest.json" ]; then
+        rm -rf "${DIST_DIR:?}/${project_name:?}"
+        CHANGED=1
+        PROJECT_CHANGED=1
+    fi
     for path in "$DIST_DIR/$name.json" "$DIST_DIR/lib$name.json"; do
         if [ -f "$path" ]; then
             rm -f "$path"
@@ -402,6 +400,7 @@ main() {
             package_project "$project_dir"
             ;;
     esac
+
     # Recheck the published checksum inventory even on an unchanged run.
     # Identical SHA256SUMS files are retained without rewriting their mtimes.
     refresh_target_checksums
