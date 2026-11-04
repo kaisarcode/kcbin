@@ -31,6 +31,17 @@ The example uses a proposed project name; no `http-server` implementation exists
 
 `KCDIST_DIR` is used for both **reading precompiled kclib dependencies** and **publishing kcbin artifacts**. The shared directory may contain packages from both repositories. The outputs of one project never embed independent LV0 packages. Full details: [Cross-compilation and dynamic linking](advanced/cross-compilation.md).
 
+## WebAssembly JavaScript interfaces
+
+A project supporting `wasm/wasm32` must publish its projected JavaScript
+interface alongside its WebAssembly binary. A JavaScript consumer imports
+`libNAME.js`; the `libNAME.mjs` generated runtime and `libNAME.wasm`
+are implementation artifacts loaded by the public module. `make test wasm`
+runs both the compiled C contract tests and JavaScript projection tests.
+
+This uses the project's precompiled kclib dependencies for the same WASM
+target. Dependencies are never rebuilt or modified by the consumer.
+
 ## Distribution
 
 Publish the compiled artifacts of all projects or one project:

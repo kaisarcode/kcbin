@@ -123,8 +123,8 @@ wasm/wasm32:
 	@$(MAKE) -s --no-print-directory build-target TARGET=wasm/wasm32 \
 		TARGET_CC="$(WASM_EMCC)" TARGET_CXX="$(WASM_EMCXX)" \
 		TARGET_AR="$(WASM_EMAR)" \
-		TARGET_EXT=wasm TARGET_CFLAGS="" TARGET_SYSTEM_LIBS="-lm" \
-		TARGET_SHARED="--no-entry -sSTANDALONE_WASM=1 -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 -sEXPORTED_FUNCTIONS=_kc_embdex_build,_kc_embdex_build_with_dictionaries,_kc_embdex_open,_kc_embdex_search,_kc_embdex_close,_kc_embdex_strerror,_kc_embdex_version"
+		TARGET_EXT=mjs TARGET_CFLAGS="" TARGET_SYSTEM_LIBS="-lm" \
+		TARGET_SHARED="--no-entry -sMODULARIZE=1 -sEXPORT_ES6=1 -sWASM_BIGINT=1 -sALLOW_MEMORY_GROWTH=1 -sALLOW_TABLE_GROWTH=1 -sFORCE_FILESYSTEM=1 -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction,FS -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 -sEXPORTED_FUNCTIONS=_kc_embdex_build,_kc_embdex_build_with_dictionaries,_kc_embdex_open,_kc_embdex_search,_kc_embdex_close,_kc_embdex_strerror,_kc_embdex_version,_malloc,_free"
 
 DEP_EMB = $(KCDIST_DIR)/libemb.c/$(TARGET)
 DEP_HNSW = $(KCDIST_DIR)/libhnsw.c/$(TARGET)
@@ -171,6 +171,10 @@ build-target: check-deps
 		TARGET_CFLAGS="$(TARGET_CFLAGS)" TARGET_SHARED="$(TARGET_SHARED)" \
 		TARGET_SYSTEM_LIBS="$(TARGET_SYSTEM_LIBS)" \
 		KCDIST_DIR="$(KCDIST_DIR)" BUILD_VERSION="$(BUILD_VERSION)"
+	@if [ "$(TARGET)" = "wasm/wasm32" ]; then \
+		cp src/libembdex.js "$(OUT_DIR)/libembdex.js" && \
+		printf '%s\\n' '{"type":"module"}' > "$(OUT_DIR)/package.json"; \
+	fi
 	@echo "OK $(TARGET)"
 
 $(OUT_OBJECT): src/libembdex.c src/libembdex.h lib/parson/parson.h Makefile $(DEP_HEADERS)
@@ -230,7 +234,7 @@ test:
 			"$(KCDIST_DIR)/libngram.c/wasm/wasm32/libngram.a" \
 			"$(KCDIST_DIR)/libleven.c/wasm/wasm32/libleven.a" \
 			-lm -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 || exit 1; \
-		(cd "$(BUILD_DIR)/test-wasm" && "$$node" embdex-test.js all); \
+		(cd "$(BUILD_DIR)/test-wasm" && "$$node" embdex-test.js all) && "$$node" src/testjs.mjs; \
 	elif [ -n "$(filter wine,$(MAKECMDGOALS))" ]; then \
 		if ! command -v "$(WINE)" >/dev/null 2>&1; then \
 			echo "Missing Wine runtime: $(WINE)" >&2; exit 1; \

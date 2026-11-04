@@ -138,8 +138,8 @@ wasm/wasm32:
 	@$(MAKE) -s --no-print-directory build-target TARGET=wasm/wasm32 \
 		TARGET_CC="$(WASM_EMCC)" \
 		TARGET_AR="$(WASM_EMAR)" \
-		TARGET_EXT=wasm TARGET_CFLAGS="" TARGET_SYSTEM_LIBS="-lm" \
-		TARGET_SHARED="--no-entry -sSTANDALONE_WASM=1 -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 -sEXPORTED_FUNCTIONS=_kc_route_open,_kc_route_add,_kc_route_run,_kc_route_http,_kc_route_close,_kc_route_strerror,_kc_route_version"
+		TARGET_EXT=mjs TARGET_CFLAGS="" TARGET_SYSTEM_LIBS="-lm" \
+		TARGET_SHARED="--no-entry -sMODULARIZE=1 -sEXPORT_ES6=1 -sWASM_BIGINT=1 -sALLOW_MEMORY_GROWTH=1 -sALLOW_TABLE_GROWTH=1 -sFORCE_FILESYSTEM=1 -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction,FS -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 -sEXPORTED_FUNCTIONS=_kc_route_open,_kc_route_add,_kc_route_run,_kc_route_http,_kc_route_close,_kc_route_strerror,_kc_route_version,_malloc,_free"
 
 DEP_HTTP = $(KCDIST_DIR)/libhttp.c/$(TARGET)
 DEP_REGEX = $(KCDIST_DIR)/libregex.c/$(TARGET)
@@ -170,6 +170,10 @@ build-target: check-deps
 		TARGET_EXT="$(TARGET_EXT)" TARGET_CLI_EXT="$(TARGET_CLI_EXT)" \
 		TARGET_CFLAGS="$(TARGET_CFLAGS)" TARGET_SHARED="$(TARGET_SHARED)" \
 		KCDIST_DIR="$(KCDIST_DIR)" BUILD_VERSION="$(BUILD_VERSION)"
+	@if [ "$(TARGET)" = "wasm/wasm32" ]; then \
+		cp src/libroute.js "$(OUT_DIR)/libroute.js" && \
+		printf '%s\\n' '{"type":"module"}' > "$(OUT_DIR)/package.json"; \
+	fi
 	@echo "OK $(TARGET)"
 
 $(OUT_OBJECT): src/libroute.c src/libroute.h Makefile $(DEP_HEADERS)
@@ -208,7 +212,7 @@ test:
 			"$(BIN_DIR)/wasm/wasm32/libroute.a" \
 			"$(KCDIST_DIR)/libregex.c/wasm/wasm32/libregex.a" \
 			-sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 || exit 1; \
-		(cd "$(BUILD_DIR)/test-wasm" && "$$node" route-test.js); \
+		(cd "$(BUILD_DIR)/test-wasm" && "$$node" route-test.js) && "$$node" src/testjs.mjs; \
 	elif [ -n "$(filter wine,$(MAKECMDGOALS))" ]; then \
 		command -v "$(WINE)" >/dev/null 2>&1 || { echo "route: missing Wine runtime $(WINE)" >&2; exit 1; }; \
 		command -v "$(WINE_X86_64_CC)" >/dev/null 2>&1 || { echo "route: missing Windows compiler $(WINE_X86_64_CC)" >&2; exit 1; }; \

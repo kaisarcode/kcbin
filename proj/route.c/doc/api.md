@@ -34,7 +34,7 @@ The input path is normalized before matching, while the query is preserved. `rou
 
 ## JavaScript API projection
 
-The intended public JavaScript projection maps `Route.add()`, `Route.get()`, `Route.post()`, `Route.put()`, `Route.delete()` and `Route.all()` to the same native registration and callback semantics. This is an API projection only, not an independent JavaScript implementation or a claim that a binding exists.
+The intended public JavaScript projection maps `Route.add()`, `Route.get()`, `Route.post()`, `Route.put()`, `Route.delete()` and `Route.all()` to the same native registration and callback semantics. On WASM, the distributed `libroute.js` implements this projection as an ES module. Native callbacks are marshaled to JavaScript handlers; the WASM build includes a Node.js API contract test.
 
 ## Next step
 

@@ -22,6 +22,22 @@ The first matching command receives a complete HTTP request through stdin. It wr
 - [C API and routing behavior](doc/api.md) - registry lifetime, callbacks, patterns and normalization.
 - [CLI](doc/cli.md) - command syntax and output.
 
+## JavaScript
+
+The WASM target publishes `libroute.js` (public ES module),
+`libroute.mjs` (Emscripten loader), `libroute.wasm`, and the
+precompiled static archive. The public JavaScript module implements the
+project's projection without exposing pointers or raw callbacks.
+
+```js
+import { route } from "./libroute.js";
+const registry = route.open();
+```
+
+Use `make test wasm` to run both the C and JavaScript contract tests.
+File-backed operations use the Emscripten virtual filesystem; JavaScript
+callers can pass portable binary values without configuring native paths.
+
 ## Build
 
 Set `KCDIST_DIR` to a precompiled kclib distribution containing `libhttp.c` and `libregex.c` for the selected target:

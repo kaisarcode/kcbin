@@ -151,6 +151,19 @@ filename and publish the completed map after success.
 separate from the binary format version. During development, only the
 current V1 layout is supported, so maps must be rebuilt when it changes.
 
+## JavaScript API
+
+The WASM distribution includes an ES module exposing `embdex.build(documents,
+options)` and `embdex.open(binary)`. A build returns the portable index as
+a `Uint8Array`. An opened index exposes `search(query, options)` as a
+JavaScript array of `{id, content, score}` and `close()`. Dictionaries are
+JavaScript arrays encoded into temporary virtual files during build; they are
+embedded in the generated index and do not need to be passed to search.
+Optional `onProgress` receives `{stage, completed, total}`.
+
+The module manages temporary files, callbacks and the WASM ABI internally.
+Use `make test wasm` to execute both native and scripting API tests.
+
 ## Next step
 
 Read [Retrieval](advanced/retrieval.md) for the candidate-selection and

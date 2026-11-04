@@ -47,6 +47,22 @@ standard error; without it, building is silent.
 - [Retrieval](doc/advanced/retrieval.md) - candidate discovery and ranking.
 - [Binary index](doc/advanced/index-format.md) - persistence and memory layout.
 
+## JavaScript
+
+The WASM target publishes `libembdex.js` (public ES module),
+`libembdex.mjs` (Emscripten loader), `libembdex.wasm`, and the
+precompiled static archive. The public JavaScript module implements the
+project's projection without exposing pointers or raw callbacks.
+
+```js
+import { embdex } from "./libembdex.js";
+const map = embdex.build([{id: "find", content: "find files"}]);
+```
+
+Use `make test wasm` to run both the C and JavaScript contract tests.
+File-backed operations use the Emscripten virtual filesystem; JavaScript
+callers can pass portable binary values without configuring native paths.
+
 ## Build
 
 From the project directory, point `KCDIST_DIR` to a precompiled kclib
