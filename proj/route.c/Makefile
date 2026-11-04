@@ -139,7 +139,7 @@ wasm/wasm32:
 		TARGET_CC="$(WASM_EMCC)" \
 		TARGET_AR="$(WASM_EMAR)" \
 		TARGET_EXT=mjs TARGET_CFLAGS="" TARGET_SYSTEM_LIBS="-lm" \
-		TARGET_SHARED="--no-entry -sMODULARIZE=1 -sEXPORT_ES6=1 -sWASM_BIGINT=1 -sALLOW_MEMORY_GROWTH=1 -sALLOW_TABLE_GROWTH=1 -sFORCE_FILESYSTEM=1 -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction,FS -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 -sEXPORTED_FUNCTIONS=_kc_route_open,_kc_route_add,_kc_route_run,_kc_route_http,_kc_route_close,_kc_route_strerror,_kc_route_version,_malloc,_free"
+		TARGET_SHARED="--no-entry -sMODULARIZE=1 -sEXPORT_ES6=1 -sALLOW_MEMORY_GROWTH=1 -sALLOW_TABLE_GROWTH=1 -sFORCE_FILESYSTEM=1 -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction,FS -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 -sEXPORTED_FUNCTIONS=_kc_route_open,_kc_route_add,_kc_route_run,_kc_route_http,_kc_route_close,_kc_route_strerror,_kc_route_version,_malloc,_free"
 
 DEP_HTTP = $(KCDIST_DIR)/libhttp.c/$(TARGET)
 DEP_REGEX = $(KCDIST_DIR)/libregex.c/$(TARGET)
