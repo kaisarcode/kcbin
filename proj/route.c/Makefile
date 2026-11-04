@@ -141,8 +141,8 @@ wasm/wasm32:
 		TARGET_EXT=mjs TARGET_CFLAGS="" TARGET_SYSTEM_LIBS="-lm" \
 		TARGET_SHARED="--no-entry -sMODULARIZE=1 -sEXPORT_ES6=1 -sALLOW_MEMORY_GROWTH=1 -sALLOW_TABLE_GROWTH=1 -sFORCE_FILESYSTEM=1 -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction,FS -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 -sEXPORTED_FUNCTIONS=_kc_route_open,_kc_route_add,_kc_route_run,_kc_route_http,_kc_route_close,_kc_route_strerror,_kc_route_version,_malloc,_free"
 
-DEP_HTTP = $(KCDIST_DIR)/libhttp.c/$(TARGET)
-DEP_REGEX = $(KCDIST_DIR)/libregex.c/$(TARGET)
+DEP_HTTP = $(KCDIST_DIR)/$(subst /,-,$(TARGET))
+DEP_REGEX = $(KCDIST_DIR)/$(subst /,-,$(TARGET))
 DEP_HEADERS = $(DEP_HTTP)/libhttp.h $(DEP_REGEX)/libregex.h
 DEP_LIBS = $(DEP_HTTP)/libhttp.a $(DEP_REGEX)/libregex.a
 DEP_INCLUDES = -I"$(DEP_HTTP)" -I"$(DEP_REGEX)"
@@ -206,11 +206,11 @@ test:
 		$(MAKE) -s --no-print-directory wasm/wasm32 || exit 1; \
 		mkdir -p "$(BUILD_DIR)/test-wasm" || exit 1; \
 		"$(WASM_EMCC)" -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
-			-I"$(KCDIST_DIR)/libhttp.c/wasm/wasm32" \
-			-I"$(KCDIST_DIR)/libregex.c/wasm/wasm32" \
+			-I"$(KCDIST_DIR)/wasm-wasm32" \
+			-I"$(KCDIST_DIR)/wasm-wasm32" \
 			-o "$(BUILD_DIR)/test-wasm/route-test.js" src/test.c \
 			"$(BIN_DIR)/wasm/wasm32/libroute.a" \
-			"$(KCDIST_DIR)/libregex.c/wasm/wasm32/libregex.a" \
+			"$(KCDIST_DIR)/wasm-wasm32/libregex.a" \
 			-sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 || exit 1; \
 		(cd "$(BUILD_DIR)/test-wasm" && "$$node" route-test.js) && "$$node" src/testjs.mjs; \
 	elif [ -n "$(filter wine,$(MAKECMDGOALS))" ]; then \
@@ -219,11 +219,11 @@ test:
 		$(MAKE) -s --no-print-directory windows/x86_64 || exit 1; \
 		mkdir -p "$(BUILD_DIR)/test-wine" || exit 1; \
 		"$(WINE_X86_64_CC)" -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
-			-I"$(KCDIST_DIR)/libhttp.c/windows/x86_64" \
-			-I"$(KCDIST_DIR)/libregex.c/windows/x86_64" \
+			-I"$(KCDIST_DIR)/windows-x86_64" \
+			-I"$(KCDIST_DIR)/windows-x86_64" \
 			-o "$(BUILD_DIR)/test-wine/route-test.exe" src/test.c \
 			"$(BIN_DIR)/windows/x86_64/libroute.a" \
-			"$(KCDIST_DIR)/libregex.c/windows/x86_64/libregex.a" || exit 1; \
+			"$(KCDIST_DIR)/windows-x86_64/libregex.a" || exit 1; \
 		cp "$(BIN_DIR)/windows/x86_64/route.exe" \
 			"$(BUILD_DIR)/test-wine/route.exe" || exit 1; \
 		(cd "$(BUILD_DIR)/test-wine" && WINEDEBUG=-all "$(WINE)" route-test.exe); \
@@ -231,11 +231,11 @@ test:
 		$(MAKE) -s --no-print-directory "$(NATIVE_TARGET)" || exit 1; \
 		mkdir -p "$(BUILD_DIR)/test" || exit 1; \
 		$(CC) -std=c11 -O2 -Wall -Wextra -Werror -Isrc \
-			-I"$(KCDIST_DIR)/libhttp.c/$(NATIVE_TARGET)" \
-			-I"$(KCDIST_DIR)/libregex.c/$(NATIVE_TARGET)" \
+			-I"$(KCDIST_DIR)/$(subst /,-,$(NATIVE_TARGET))" \
+			-I"$(KCDIST_DIR)/$(subst /,-,$(NATIVE_TARGET))" \
 			-o "$(BUILD_DIR)/test/route-test" src/test.c \
 			"$(BIN_DIR)/$(NATIVE_TARGET)/libroute.a" \
-			"$(KCDIST_DIR)/libregex.c/$(NATIVE_TARGET)/libregex.a" || exit 1; \
+			"$(KCDIST_DIR)/$(subst /,-,$(NATIVE_TARGET))/libregex.a" || exit 1; \
 		cp "$(BIN_DIR)/$(NATIVE_TARGET)/route$(TARGET_CLI_EXT)" \
 			"$(BUILD_DIR)/test/route" || exit 1; \
 		(cd "$(BUILD_DIR)/test" && ./route-test); \

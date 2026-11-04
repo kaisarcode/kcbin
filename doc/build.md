@@ -27,7 +27,7 @@ Set `KCDIST_DIR` to the shared distribution root containing the **existing** pre
 KCDIST_DIR="$HOME/kclib/dist" ./scripts/build.sh http-server
 ```
 
-The example uses a proposed project name; no `http-server` implementation exists yet. A project's Makefile must resolve each dependency using the requested target, for example `libhttp.c/linux/x86_64/libhttp.so` and `libhttp.c/linux/x86_64/libhttp.h`. Windows additionally needs its import library `.dll.a`. Fail when a required target-specific artifact is absent.
+The example uses a proposed project name; no `http-server` implementation exists yet. Kclib artifacts are grouped by target: for example, `linux-x86_64/libhttp.so` and `linux-x86_64/libhttp.h` live alongside other libraries for the same architecture. Windows additionally needs its import library `.dll.a`. Fail when a required target-specific artifact is absent.
 
 `KCDIST_DIR` is used for both **reading precompiled kclib dependencies** and **publishing kcbin artifacts**. The shared directory may contain packages from both repositories. The outputs of one project never embed independent LV0 packages. Full details: [Cross-compilation and dynamic linking](advanced/cross-compilation.md).
 

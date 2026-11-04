@@ -126,12 +126,12 @@ wasm/wasm32:
 		TARGET_EXT=mjs TARGET_CFLAGS="" TARGET_SYSTEM_LIBS="-lm" \
 		TARGET_SHARED="--no-entry -sMODULARIZE=1 -sEXPORT_ES6=1 -sALLOW_MEMORY_GROWTH=1 -sALLOW_TABLE_GROWTH=1 -sFORCE_FILESYSTEM=1 -sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,getValue,setValue,HEAPU8,HEAPF32,addFunction,removeFunction,FS -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 -sEXPORTED_FUNCTIONS=_kc_embdex_build,_kc_embdex_build_with_dictionaries,_kc_embdex_open,_kc_embdex_search,_kc_embdex_close,_kc_embdex_strerror,_kc_embdex_version,_malloc,_free"
 
-DEP_EMB = $(KCDIST_DIR)/libemb.c/$(TARGET)
-DEP_HNSW = $(KCDIST_DIR)/libhnsw.c/$(TARGET)
-DEP_BM25 = $(KCDIST_DIR)/libbm25.c/$(TARGET)
-DEP_MMAP = $(KCDIST_DIR)/libmmap.c/$(TARGET)
-DEP_NGRAM = $(KCDIST_DIR)/libngram.c/$(TARGET)
-DEP_LEVEN = $(KCDIST_DIR)/libleven.c/$(TARGET)
+DEP_EMB = $(KCDIST_DIR)/$(subst /,-,$(TARGET))
+DEP_HNSW = $(KCDIST_DIR)/$(subst /,-,$(TARGET))
+DEP_BM25 = $(KCDIST_DIR)/$(subst /,-,$(TARGET))
+DEP_MMAP = $(KCDIST_DIR)/$(subst /,-,$(TARGET))
+DEP_NGRAM = $(KCDIST_DIR)/$(subst /,-,$(TARGET))
+DEP_LEVEN = $(KCDIST_DIR)/$(subst /,-,$(TARGET))
 DEP_DIRS = $(DEP_EMB) $(DEP_HNSW) $(DEP_BM25) $(DEP_MMAP) $(DEP_NGRAM) $(DEP_LEVEN)
 DEP_LIBS = $(DEP_EMB)/libemb.a \
     $(DEP_HNSW)/libhnsw.a \
@@ -227,12 +227,12 @@ test:
 		"$(WASM_EMCXX)" -o "$(BUILD_DIR)/test-wasm/embdex-test.js" \
 			"$(BUILD_DIR)/test-wasm/embdex-test.o" \
 			"$(BIN_DIR)/wasm/wasm32/libembdex.a" \
-			"$(KCDIST_DIR)/libemb.c/wasm/wasm32/libemb.a" \
-			"$(KCDIST_DIR)/libhnsw.c/wasm/wasm32/libhnsw.a" \
-			"$(KCDIST_DIR)/libbm25.c/wasm/wasm32/libbm25.a" \
-			"$(KCDIST_DIR)/libmmap.c/wasm/wasm32/libmmap.a" \
-			"$(KCDIST_DIR)/libngram.c/wasm/wasm32/libngram.a" \
-			"$(KCDIST_DIR)/libleven.c/wasm/wasm32/libleven.a" \
+			"$(KCDIST_DIR)/wasm-wasm32/libemb.a" \
+			"$(KCDIST_DIR)/wasm-wasm32/libhnsw.a" \
+			"$(KCDIST_DIR)/wasm-wasm32/libbm25.a" \
+			"$(KCDIST_DIR)/wasm-wasm32/libmmap.a" \
+			"$(KCDIST_DIR)/wasm-wasm32/libngram.a" \
+			"$(KCDIST_DIR)/wasm-wasm32/libleven.a" \
 			-lm -sINITIAL_MEMORY=268435456 -sSTACK_SIZE=4194304 || exit 1; \
 		(cd "$(BUILD_DIR)/test-wasm" && "$$node" embdex-test.js all) && "$$node" src/testjs.mjs; \
 	elif [ -n "$(filter wine,$(MAKECMDGOALS))" ]; then \

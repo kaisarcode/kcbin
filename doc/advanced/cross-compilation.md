@@ -20,15 +20,15 @@ This is **the set of recognized kclib targets, not a claim that every kcbin tool
 
 ## Precompiled dependencies
 
-Point `KCDIST_DIR` at an existing kclib distribution root. It contains the published per-project manifests, static and shared libraries, import libraries where applicable, and public headers for each target.
+Point `KCDIST_DIR` at an existing kclib distribution root. It groups all libraries and their public headers under one directory per `platform-arch`, with the per-library manifests at the distribution root.
 
 For a hypothetical `http-server` composition targeting `linux/x86_64`, the needed inputs include:
 
 ```text
-$KCDIST_DIR/libhttp.c/linux/x86_64/libhttp.so
-$KCDIST_DIR/libhttp.c/linux/x86_64/libhttp.h
-$KCDIST_DIR/libnetl.c/linux/x86_64/libnetl.so
-$KCDIST_DIR/libnetl.c/linux/x86_64/libnetl.h
+$KCDIST_DIR/linux-x86_64/libhttp.so
+$KCDIST_DIR/linux-x86_64/libhttp.h
+$KCDIST_DIR/linux-x86_64/libnetl.so
+$KCDIST_DIR/linux-x86_64/libnetl.h
 ```
 
 A dynamically linked Windows build typically uses `libhttp.dll.a` and `libnetl.dll.a` at link time, and the corresponding `.dll` files at runtime. For macOS the dynamic library is generally `.dylib`. Android commonly uses `.so`. Static compositions instead link the matching target's `.a` archives. Emscripten `wasm/wasm32` archives contain WASM-compatible object files, and its `.so` files are side modules rather than native ELF/PE/Mach-O shared libraries. For iOS and iOS Simulator, packaging/signing and loader restrictions require an explicitly supported deployment model.
@@ -52,7 +52,7 @@ The project's `manifest.json` declares its dependencies by their logical package
 
 ## Runtime discovery
 
-Link-time success does not make a dynamically linked installed program runnable. A shared library may live in a separate package directory from the consuming executable. Static compositions such as `semidx` incorporate the required kclib object code at link time and do not need separate kclib shared libraries at runtime.
+Link-time success does not make a dynamically linked installed program runnable. A shared library may need an explicit runtime search path even when all kclibs are published together for one platform-architecture. Static compositions such as `semidx` incorporate the required kclib object code at link time and do not need separate kclib shared libraries at runtime.
 
 On Linux, the executable may need a suitable relative RPATH/RUNPATH or a launcher-configured library search path. On macOS, loader paths and any signing requirements need to be satisfied. On Windows, the installed DLL directory must be in the executable's permitted DLL search locations. Android and Apple mobile targets have additional packaging restrictions.
 
