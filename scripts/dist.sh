@@ -355,6 +355,13 @@ sync_target() {
         case "$file" in
             *.h) continue ;;
             "lib$name."*|"$name"|"$name.exe") ;;
+            package.json)
+                if [[ "$target_dir" != */wasm/* ]]; then
+                    echo "error: module metadata outside WASM target: $file" >&2
+                    rm -rf "$staging"
+                    return 1
+                fi
+                ;;
             *)
                 echo "error: unexpected build artifact: $file" >&2
                 rm -rf "$staging"
