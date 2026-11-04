@@ -107,7 +107,7 @@ write_target_file_list() {
     name=$(capability_name "$project_name")
 
     find "$target_dir" -maxdepth 1 -type f \
-        \( -name "lib$name.*" -o -name "$name" -o -name "$name.exe" \) \
+        \( -name "lib$name.*" -o -name "$name" -o -name "$name.exe" -o -name "package.json" \) \
         ! -name "*.sync-conflict-*" \
         -printf '%f\n' | LC_ALL=C sort -u > "$output_file"
 }
@@ -128,7 +128,7 @@ target_checksum_is_current() {
     [ -f "$checksum" ] || return 1
 
     if find "$target_dir" -maxdepth 1 -type f \
-        \( -name "lib$name.*" -o -name "$name" -o -name "$name.exe" \) \
+        \( -name "lib$name.*" -o -name "$name" -o -name "$name.exe" -o -name "package.json" \) \
         ! -name "*.sync-conflict-*" \
         -newer "$checksum" -print -quit | grep -q .; then
         return 1
@@ -173,7 +173,7 @@ update_target_checksum() {
         printf '%s  %s\n' "$sha256" "$filename" >> "$temporary"
     done < <(
         find "$target_dir" -maxdepth 1 -type f \
-            \( -name "lib$name.*" -o -name "$name" -o -name "$name.exe" \) \
+            \( -name "lib$name.*" -o -name "$name" -o -name "$name.exe" -o -name "package.json" \) \
             ! -name "*.sync-conflict-*" \
             -print0 | sort -z
     )

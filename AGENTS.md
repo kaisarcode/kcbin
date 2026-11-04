@@ -139,6 +139,18 @@ Follow the kclib monorepo conventions:
 
 The scripts discover projects by `Makefile`; do not hardcode an inventory. Each project defines its own supported target matrix and link flags.
 
+## WebAssembly JavaScript contract
+
+For a kcbin project supporting `wasm/wasm32`, the public JavaScript
+projection must be implemented and shipped together with the WASM binary.
+The distribution includes `libNAME.js` (the projected API),
+`libNAME.mjs` (the Emscripten runtime), `libNAME.wasm` and the
+available link artifacts. `package.json` marks the public JS as an ES
+module. `make test wasm` must exercise the JavaScript public API as
+well as the native C tests. A raw list of exported C symbols is not a
+JavaScript API. Build and test the binding inside the consuming kcbin
+project without modifying or rebuilding dependent kclibs.
+
 ## Test quality contract
 
 Test quality is a mandatory part of implementing or changing any kcbin project.

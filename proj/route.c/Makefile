@@ -172,7 +172,7 @@ build-target: check-deps
 		KCDIST_DIR="$(KCDIST_DIR)" BUILD_VERSION="$(BUILD_VERSION)"
 	@if [ "$(TARGET)" = "wasm/wasm32" ]; then \
 		cp src/libroute.js "$(OUT_DIR)/libroute.js" && \
-		printf '%s\\n' '{"type":"module"}' > "$(OUT_DIR)/package.json"; \
+		printf '%s\n' '{"type":"module"}' > "$(OUT_DIR)/package.json"; \
 	fi
 	@echo "OK $(TARGET)"
 
