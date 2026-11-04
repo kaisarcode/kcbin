@@ -15,8 +15,6 @@ printf 'GET /notes/42 HTTP/1.1\r\nHost: localhost\r\n\r\n' |
 ```
 
 The first matching command receives a complete HTTP request through stdin. It writes an HTTP response to stdout, which `route` forwards unchanged. Commands must be trusted, and handlers must generate valid HTTP responses. Invalid requests, unmatched routes and failing commands result in a nonzero exit status, not an automatically generated HTTP response. In a native HTTP server, call `kc_route_http()` from the `libhttp.c` request callback to avoid reparsing.
-
-
 ## Documentation
 
 - [C API and routing behavior](doc/api.md) - registry lifetime, callbacks, patterns and normalization.

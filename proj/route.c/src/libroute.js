@@ -11,23 +11,58 @@ import createModule from "./libroute.mjs";
 
 const wasm = await createModule();
 
+/**
+ * Allocates WebAssembly memory.
+ * @param {number} size Allocation size in bytes.
+ * @return {number} Allocated memory address.
+ */
 function allocate(size) {
     const ptr = wasm._malloc(Math.max(1, size));
     if (!ptr) throw new Error("Out of WebAssembly memory");
     return ptr;
 }
+
+/**
+ * Stores a JavaScript string in WebAssembly memory.
+ * @param {string} value String to store.
+ * @return {number} Address of the stored string.
+ */
 function cstring(value) {
     if (typeof value !== "string") throw new TypeError("Expected string");
     const size = wasm.lengthBytesUTF8(value) + 1, ptr = allocate(size);
     wasm.stringToUTF8(value, ptr, size);
     return ptr;
 }
+
+/**
+ * Reads a WebAssembly string.
+ * @param {number} ptr Address of the string.
+ * @return {?string} Decoded string or null.
+ */
 function string(ptr) { return ptr ? wasm.UTF8ToString(ptr) : null; }
+
+/**
+ * Reads an unsigned integer from WebAssembly memory.
+ * @param {number} ptr Address of the integer.
+ * @return {number} Unsigned integer value.
+ */
 function uint(ptr) { return wasm.getValue(ptr, "i32") >>> 0; }
+
+/**
+ * Raises an error for a native failure status.
+ * @param {number} status Native status code.
+ * @return {void} Nothing.
+ */
 function check(status) {
     if (status !== 0) throw new Error(string(wasm._kc_route_strerror(status)) || "Native error " + status);
 }
 
+/**
+ * Reads route fields from WebAssembly memory.
+ * @param {number} ptr Address of the fields.
+ * @param {number} count Number of fields.
+ * @return {Array<object>} Decoded fields.
+ */
 function readFields(ptr, count) {
     return Array.from({length: count}, (_, i) => ({
         name: string(uint(ptr + i * 8)),
@@ -35,6 +70,11 @@ function readFields(ptr, count) {
     }));
 }
 
+/**
+ * Reads a route request from WebAssembly memory.
+ * @param {number} ptr Address of the request.
+ * @return {?object} Decoded request or null.
+ */
 function readRequest(ptr) {
     if (!ptr) return null;
     const body = uint(ptr + 28);
@@ -52,6 +92,11 @@ function readRequest(ptr) {
     };
 }
 
+/**
+ * Reads a route match from WebAssembly memory.
+ * @param {number} ptr Address of the match.
+ * @return {object} Decoded route match.
+ */
 function readMatch(ptr) {
     const items = uint(ptr + 20), count = uint(ptr + 24);
     return {
@@ -72,8 +117,27 @@ function readMatch(ptr) {
  */
 function withRequest(request, invoke) {
     const owned = [], native = allocate(52);
+
+    /**
+     * Retains an allocated address for release.
+     * @param {number} ptr Address to retain.
+     * @return {number} Retained address.
+     */
     const hold = ptr => { owned.push(ptr); return ptr; };
+
+    /**
+     * Converts an optional field to a native string address.
+     * @param {*} value Field value.
+     * @return {number} Native string address.
+     */
     const field = value => value === null || value === undefined ? 0 : hold(cstring(value));
+
+    /**
+     * Stores request fields in native memory.
+     * @param {*} items Request fields.
+     * @param {number} offset Request field offset.
+     * @return {void} Nothing.
+     */
     const fields = (items, offset) => {
         const entries = Array.isArray(items)
             ? items.map(x => [x.name, x.value])
@@ -115,6 +179,11 @@ function withRequest(request, invoke) {
 }
 
 export const route = {
+
+    /**
+     * Opens a route registry.
+     * @return {object} Route registry.
+     */
     open() {
         const out = allocate(4), callbacks = [];
         let handle = 0;
@@ -123,11 +192,25 @@ export const route = {
             check(wasm._kc_route_open(out));
             handle = uint(out);
             if (!handle) throw new Error("Route registry was not created");
+
+            /**
+             * Checks that the route registry remains open.
+             * @return {number} Native route registry address.
+             */
             const valid = () => {
                 if (!handle) throw new Error("Route registry is closed");
                 return handle;
             };
             const instance = {
+
+                /**
+                 * Adds a route handler.
+                 * @param {string} method Request method.
+                 * @param {string} pattern Route pattern.
+                 * @param {string} id Route identifier.
+                 * @param {Function} handler Optional route handler.
+                 * @return {object} Route registry.
+                 */
                 add(method, pattern, id, handler) {
                     const inputs = [method, pattern, id].map(cstring);
                     let callback = 0;
@@ -146,11 +229,58 @@ export const route = {
                         for (const ptr of inputs) wasm._free(ptr);
                     }
                 },
+
+                /**
+                 * Adds a GET route handler.
+                 * @param {string} pattern Route pattern.
+                 * @param {string} id Route identifier.
+                 * @param {Function} handler Optional route handler.
+                 * @return {object} Route registry.
+                 */
                 get(pattern, id, handler) { return instance.add("GET", pattern, id, handler); },
+
+                /**
+                 * Adds a POST route handler.
+                 * @param {string} pattern Route pattern.
+                 * @param {string} id Route identifier.
+                 * @param {Function} handler Optional route handler.
+                 * @return {object} Route registry.
+                 */
                 post(pattern, id, handler) { return instance.add("POST", pattern, id, handler); },
+
+                /**
+                 * Adds a PUT route handler.
+                 * @param {string} pattern Route pattern.
+                 * @param {string} id Route identifier.
+                 * @param {Function} handler Optional route handler.
+                 * @return {object} Route registry.
+                 */
                 put(pattern, id, handler) { return instance.add("PUT", pattern, id, handler); },
+
+                /**
+                 * Adds a DELETE route handler.
+                 * @param {string} pattern Route pattern.
+                 * @param {string} id Route identifier.
+                 * @param {Function} handler Optional route handler.
+                 * @return {object} Route registry.
+                 */
                 delete(pattern, id, handler) { return instance.add("DELETE", pattern, id, handler); },
+
+                /**
+                 * Adds a route handler for every method.
+                 * @param {string} pattern Route pattern.
+                 * @param {string} id Route identifier.
+                 * @param {Function} handler Optional route handler.
+                 * @return {object} Route registry.
+                 */
                 all(pattern, id, handler) { return instance.add("ALL", pattern, id, handler); },
+
+                /**
+                 * Matches a request against registered routes.
+                 * @param {string} method Request method.
+                 * @param {string} target Request target.
+                 * @return {?object} Matched route or null.
+                 */
                 run(method, target) {
                     const a = cstring(method), b = cstring(target), matched = allocate(4);
                     try {
@@ -163,6 +293,12 @@ export const route = {
                         wasm._free(a);
                     }
                 },
+
+                /**
+                 * Matches an HTTP request against registered routes.
+                 * @param {object} request HTTP request.
+                 * @return {boolean} Whether a route matched.
+                 */
                 http(request) {
                     return withRequest(request, ptr => {
                         const matched = allocate(4);
@@ -173,6 +309,11 @@ export const route = {
                         } finally { wasm._free(matched); }
                     });
                 },
+
+                /**
+                 * Closes the route registry.
+                 * @return {void} Nothing.
+                 */
                 close() {
                     if (handle) {
                         wasm._kc_route_close(handle);
@@ -184,6 +325,11 @@ export const route = {
             return instance;
         } finally { wasm._free(out); }
     },
+
+    /**
+     * Gets the native route library version.
+     * @return {number} Library version.
+     */
     version() { return Number(wasm._kc_route_version()); }
 };
 export default route;

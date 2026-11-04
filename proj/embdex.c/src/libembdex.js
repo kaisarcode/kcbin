@@ -13,11 +13,22 @@ const wasm = await createModule();
 const filesystem = wasm.FS;
 let nextPath = 0;
 
+/**
+ * Allocates WebAssembly memory.
+ * @param {number} size Allocation size in bytes.
+ * @return {number} Allocated memory address.
+ */
 function allocate(size) {
     const ptr = wasm._malloc(Math.max(1, size));
     if (!ptr) throw new Error("Out of WebAssembly memory");
     return ptr;
 }
+
+/**
+ * Stores a JavaScript string in WebAssembly memory.
+ * @param {string} text String to store.
+ * @return {number} Address of the stored string.
+ */
 function cstring(text) {
     if (typeof text !== "string") throw new TypeError("Expected a string");
     const size = wasm.lengthBytesUTF8(text) + 1;
@@ -25,12 +36,41 @@ function cstring(text) {
     wasm.stringToUTF8(text, ptr, size);
     return ptr;
 }
+
+/**
+ * Reads a WebAssembly string.
+ * @param {number} ptr Address of the string.
+ * @return {?string} Decoded string or null.
+ */
 function string(ptr) { return ptr ? wasm.UTF8ToString(ptr) : null; }
+
+/**
+ * Reads an unsigned integer from WebAssembly memory.
+ * @param {number} ptr Address of the integer.
+ * @return {number} Unsigned integer value.
+ */
 function uint(ptr) { return wasm.getValue(ptr, "i32") >>> 0; }
+
+/**
+ * Raises an error for a native failure status.
+ * @param {number} status Native status code.
+ * @return {void} Nothing.
+ */
 function check(status) {
     if (status !== 0) throw new Error(string(wasm._kc_embdex_strerror(status)) || "Native error " + status);
 }
+
+/**
+ * Creates a temporary filesystem path.
+ * @return {string} Temporary path.
+ */
 function path() { return "/tmp/embdex-" + (++nextPath); }
+
+/**
+ * Removes a temporary file if it exists.
+ * @param {string} file Temporary file path.
+ * @return {void} Nothing.
+ */
 function safeUnlink(file) {
     try { filesystem.unlink(file); }
     catch (error) { if (error.code !== "ENOENT") throw error; }
@@ -60,6 +100,13 @@ function withDocuments(documents, fn) {
 }
 
 export const embdex = {
+
+    /**
+     * Builds an embdex index.
+     * @param {Array<object>} documents Associations to index.
+     * @param {object} options Build options.
+     * @return {Uint8Array} Built index binary.
+     */
     build(documents, {dictionaries = [], onProgress} = {}) {
         if (!Array.isArray(dictionaries)) throw new TypeError("Expected dictionary array");
         const destination = path() + ".bin";
@@ -104,6 +151,12 @@ export const embdex = {
             wasm._free(dst);
         }
     },
+
+    /**
+     * Opens an embdex index.
+     * @param {Uint8Array} binary Index binary.
+     * @return {object} Open index.
+     */
     open(binary) {
         if (!(binary instanceof Uint8Array)) throw new TypeError("Expected Uint8Array");
         const file = path() + ".bin";
@@ -114,11 +167,23 @@ export const embdex = {
             check(wasm._kc_embdex_open(out, name));
             let handle = uint(out);
             if (!handle) throw new Error("Index was not opened");
+
+            /**
+             * Checks that the index remains open.
+             * @return {number} Native index address.
+             */
             const valid = () => {
                 if (!handle) throw new Error("Index is closed");
                 return handle;
             };
             return {
+
+                /**
+                 * Searches the open index.
+                 * @param {string} query Search query.
+                 * @param {object} options Search options.
+                 * @return {Array<object>} Search results.
+                 */
                 search(query, {limit} = {}) {
                     const input = cstring(query), found = [];
                     let cfg = 0, limitPtr = 0, callback = 0;
@@ -147,6 +212,11 @@ export const embdex = {
                         wasm._free(input);
                     }
                 },
+
+                /**
+                 * Closes the open index.
+                 * @return {void} Nothing.
+                 */
                 close() {
                     if (handle) {
                         wasm._kc_embdex_close(handle);
@@ -163,6 +233,11 @@ export const embdex = {
             wasm._free(name);
         }
     },
+
+    /**
+     * Gets the native embdex library version.
+     * @return {number} Library version.
+     */
     version() { return Number(wasm._kc_embdex_version()); }
 };
 export default embdex;

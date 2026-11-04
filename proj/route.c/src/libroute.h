@@ -41,7 +41,8 @@ typedef struct {
 /**
  * Process a matching route. All pointers remain borrowed until return.
  * Return zero to check the next route, or nonzero to accept the match.
- * @param match Borrowed request (if supplied), canonical path, route ID, and captures.
+ * @param match Borrowed request (if supplied), canonical path, route ID,
+ * and captures.
  * @param userdata Callback context owned by the caller.
  * @return Zero to continue, nonzero to stop routing.
  */
