@@ -123,7 +123,7 @@ reporting is independent from file-format compatibility.
 
 Each independently distributable project owns its `README.md`, `Makefile`, `manifest.json`, `src/`, tests, and LGPLv3 license files (`LICENSE` with the LGPLv3 text and `COPYING` with the accompanying GPLv3 text, matching kclib project conventions). Use `doc/` only when the project requires more documentation. A project may provide a native CLI, shared library, or both, without an obligatory common API.
 
-Source metadata fields are `name`, `description`, `author`, `license`, `website`, `repository`, `level`, and `dependencies`. For LV1, use `"level": 1` and a nonempty `"dependencies"` array of names identifying LV0 kclibs. See `doc/manifest.md`. The distribution script retains source metadata and adds built artifact hashes. The current project-manifest consumer does not yet install declared dependencies automatically; never claim it does.
+Source metadata fields are `name`, `description`, `author`, `license`, `website`, `repository`, `level`, and `dependencies`. For LV1, use `"level": 1` and a nonempty `"dependencies"` array of names identifying LV0 kclibs. See `doc/manifest.md`. The source manifest remains declarative; the distribution does not generate or copy per-project JSON manifests. Published artifact hashes live only in each target's `SHA256SUMS`. No dependency installer is implied by the source metadata.
 
 Use existing `kclib` public APIs according to their README, public headers, and documentation on the selected branch. Do not assume that a kclib catalog is available at a historical path. Any connection between APIs, CLI processes, and .flow files belongs at the composition boundary.
 
@@ -133,9 +133,9 @@ Follow the kclib monorepo conventions:
 
 - `scripts/build.sh [all|NAME]` invokes each project's `make all`.
 - `scripts/test.sh [all|NAME]` runs project-local tests; standard output includes named `[PASS]` cases where applicable.
-- `scripts/dist.sh [all|NAME]` publishes project-scoped distribution manifests and verified artifacts into the ignored `dist/`.
+- `scripts/dist.sh [all|NAME]` publishes verified binaries and public headers into the ignored flat `dist/<platform>-<arch>/` directories; each target contains one shared `LICENSE`, one `COPYING`, and one `SHA256SUMS`.
 - Project build outputs belong in `proj/<name>/bin/<platform>/<arch>/`; source metadata belongs in `proj/<name>/manifest.json`.
-- `KCDIST_DIR` may select a shared distribution root; never prune packages belonging to other repositories.
+- `KCDIST_DIR` may select a shared distribution root; never prune artifacts belonging to other repositories. Do not publish generated README files, per-project directories, or per-project JSON manifests.
 
 The scripts discover projects by `Makefile`; do not hardcode an inventory. Each project defines its own supported target matrix and link flags.
 
@@ -197,7 +197,7 @@ Use the same platform/architecture names, cross-compilers, toolchains, SDKs, sys
 
 For dynamic linking, Linux and Android use `.so`, macOS uses `.dylib`, and Windows uses `.dll.a` with the corresponding `.dll` at runtime. For static linking, use the matching precompiled `.a` files for each target. Libraries containing C++ code, such as GGML inside `libemb`, require an appropriate C++ linker even when the consumer sources and public API are C. Other targets, especially iOS and WASM, require confirmation that the selected artifacts support the intended link/runtime model. Do not claim cross-compilation support solely because a kclib has a matching target directory.
 
-The package manifest declares dependency names, while the build selects actual target-specific artifacts. Publish only the LV1 project's own outputs; do not bundle separate kclib artifacts. Distinguish build-time library search paths from deployment-time dynamic loader resolution when dynamic linking is used. A runner/package manager could arrange runtime discovery but is **not currently required or guaranteed**; see `doc/advanced/cross-compilation.md`.
+The source project manifest declares dependency names, while the build selects actual target-specific artifacts. Publish only the LV1 project's own outputs; do not bundle separate kclib artifacts. Distinguish build-time library search paths from deployment-time dynamic loader resolution when dynamic linking is used. A runner/package manager could arrange runtime discovery but is **not currently required or guaranteed**; see `doc/advanced/cross-compilation.md`.
 
 ## Source control and documentation
 

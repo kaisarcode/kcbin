@@ -20,7 +20,7 @@ This is **the set of recognized kclib targets, not a claim that every kcbin tool
 
 ## Precompiled dependencies
 
-Point `KCDIST_DIR` at an existing kclib distribution root. It groups all libraries and their public headers under one directory per `platform-arch`, with the per-library manifests at the distribution root.
+Point `KCDIST_DIR` at an existing kclib distribution root. It groups all libraries and their public headers under one directory per `platform-arch`, with a single `SHA256SUMS` artifact inventory per target and no generated per-library JSON files.
 
 For a hypothetical `http-server` composition targeting `linux/x86_64`, the needed inputs include:
 
@@ -46,7 +46,7 @@ proj/http-server/bin/windows/x86_64/http-server.exe
 
 These paths are examples, not files already built.
 
-The project's `manifest.json` declares its dependencies by their logical package names (for example `libhttp` and `libnetl`). The published artifact manifest provides the LV1 package's own files and their checksums. **Do not duplicate dependent kclib artifacts in the LV1 package.**
+The project's source `manifest.json` declares dependencies by their logical package names (for example `libhttp` and `libnetl`). Published artifacts are verified in the target directory's `SHA256SUMS`, not in generated per-project JSON manifests. **Do not duplicate dependent kclib artifacts when publishing a kcbin project.**
 
 `KCDIST_DIR` is the shared root for both precompiled LV0 dependency input and kcbin publication output. Builds use only existing target-specific artifacts; `scripts/dist.sh` publishes the LV1 project's outputs without building or altering LV0 packages.
 

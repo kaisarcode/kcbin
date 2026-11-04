@@ -20,7 +20,7 @@ A future HTTP server, for example, can compose `libnetl` with `libhttp` without 
 
 ## Distribution
 
-Build and test one project independently. Publish its artifacts and per-project metadata without depending on the rest of the kcbin repository. The dependency manifest records requirements; the package-manager implementation determines how and when those are installed.
+Build and test one project independently. Publish its artifacts into the shared `dist/<platform>-<arch>/` directories without rebuilding lower-level libraries. Each target contains one `LICENSE`, one `COPYING`, and one `SHA256SUMS` for all published libraries; no generated per-project JSON manifests or README files are included. Source `manifest.json` files continue recording dependencies, but are not copied to `dist/`.
 
 The cross-compilation targets follow kclib; the LV1 build reuses precompiled, target-matched LV0 shared libraries rather than rebuilding them. Refer to [Cross-compilation and dynamic linking](cross-compilation.md) for platform-specific link artifacts and deployment considerations.
 

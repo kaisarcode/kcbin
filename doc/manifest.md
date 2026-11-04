@@ -29,9 +29,9 @@ The manifest declares direct requirements rather than copying dependent binaries
 
 ## Publication and current support
 
-`./scripts/dist.sh NAME` reads the project's source manifest and publishes `dist/NAME/manifest.json` with an unchanged `metadata` object plus a generated `artifacts` list containing target paths and checksums. There is no repository-wide distribution manifest.
+`./scripts/dist.sh NAME` publishes the project's built binaries and public headers into `dist/<platform>-<arch>/`, alongside any existing kclib artifacts for the same target. Each target's `SHA256SUMS` is the published artifact inventory and checksum reference. No `dist/NAME/manifest.json`, generated `libNAME.json`, project README, or central distribution manifest is produced.
 
-The current `kc` package reader understands the existing artifact format, but **does not automatically resolve or install the new `dependencies` field**. This is declarative metadata for now. Do not claim that installation ordering, dependency checks, or runtime linkage are already enforced.
+The source `manifest.json` is declarative metadata used to describe dependencies. `dist.sh` does not install or resolve the `dependencies` field, nor does the distribution guarantee runtime loader configuration.
 
 ## Next step
 
