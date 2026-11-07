@@ -44,7 +44,8 @@ standard error; without it, building is silent.
 - [Preparing data](doc/data-preparation.md) - design, generate, and test corpora and dictionaries for any domain.
 - [CLI](doc/cli.md) - corpus and dictionary input, commands, and progress.
 - [C API](doc/api.md) - build, search, callbacks, and ownership.
-- [Retrieval](doc/advanced/retrieval.md) - candidate discovery and ranking.
+- [Retrieval algorithm](doc/advanced/algorithm.md) - complete diagrams, mandatory dense core, optional lexical stages and multi-span boundaries.
+- [Retrieval implementation](doc/advanced/retrieval.md) - current candidate discovery and ranking rules (including BM25).
 - [Binary index](doc/advanced/index-format.md) - persistence and memory layout.
 
 ## JavaScript
