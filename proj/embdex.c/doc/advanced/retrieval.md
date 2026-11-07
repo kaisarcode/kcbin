@@ -1,5 +1,95 @@
 # Retrieval
 
+## Algorithm: Layered Hybrid Retrieval
+
+**Layered Hybrid Retrieval (LHR)** is the name of the embdex retrieval
+composition. It is a project-specific name for an instance of the established
+*hybrid retrieval* family, not a claim to a new academic retrieval method.
+Its fundamental retrieval mechanism is **curated associations + precomputed
+dense embeddings + nearest-neighbor search**. Lexical components supply
+independent, precisely scoped evidence; they do not replace the dense
+retrieval model or encode application-specific decisions.
+
+### Preparation (once per corpus version)
+
+**P0. Compile the capability map.** Validate the curated ID/text
+associations, preserving repeated logical IDs as distinct association
+ordinals. Build the lexical lookup structures, apply any explicitly supplied
+dictionary to its designated representation, generate each association's
+embedding once and serialize the associations, vectors, lexical structures
+and dictionary into one self-contained binary. An opened native map uses
+`libmmap`; opening the map must not recompute corpus embeddings. For small
+maps the current implementation compares vectors directly; larger maps build
+an HNSW search graph when opened. The persisted artifact stores the
+vectors, **not** a serialized HNSW graph.
+
+### Query pipeline (for every input)
+
+1. **Prepare the query.** Validate its encoding, preserve the original
+   text, and derive normalized/tokenized representations. Output:
+   `Query`. This step does not choose a capability.
+2. **Transform, if configured.** Apply the map's explicit dictionary and
+   spelling-normalization contracts to derive bounded query alternatives.
+   Output: `QueryVariants` with provenance. Transformations must not
+   silently introduce application-specific semantics or recursively rewrite
+   each other's outputs.
+3. **Retrieve lexical evidence.** On the query representations, compute
+   literal/phrase evidence (`libngram`), term evidence (BM25) and bounded
+   spelling evidence (`libleven`). Output: `LexicalEvidence` keyed by
+   association ordinal and query position. This is the **only** lexical
+   evidence layer: later stages consume its results, not rerun ad hoc
+   corrections. The absence of lexical evidence cannot independently
+   reject a semantically valid association.
+4. **Retrieve dense evidence.** Embed the relevant query representation
+   using `libemb` and retrieve association vectors using cosine search
+   (direct comparison or `libhnsw`). Output: `DenseEvidence` keyed by
+   association ordinal. A deterministic, unambiguous complete lexical
+   match may make semantic retrieval unnecessary for that query; otherwise
+   dense evidence remains available. No corpus embedding is regenerated.
+5. **Consolidate candidates.** Union the association ordinals discovered
+   by lexical and dense retrieval. Preserve their evidence and provenance
+   as separate fields. Repeated logical IDs are **not** merged at this
+   stage. Output: `Candidates`. Never compare uncalibrated edit-distance,
+   BM25 and cosine scores as though they share a scale.
+6. **Apply one declared ranking policy.** Rank candidates using a
+   documented, deterministic evidence-combination contract. Any
+   admissibility filter has one stated purpose and must be applied
+   consistently to all candidates, not introduced as exceptions for
+   particular phrases, IDs, languages or failed tests. Output:
+   `RankedCandidates`. Lexical evidence may corroborate a candidate, but
+   must not quietly redefine the semantic retrieval model.
+7. **Return candidates.** Apply the requested result limit and emit
+   original association IDs, texts, scores and, where diagnostics are
+   enabled, evidence provenance. The caller owns classification,
+   disambiguation, context selection, action orchestration and any
+   final decision. Retrieval **never executes** a capability.
+
+### Invariants
+
+- The same pipeline runs for every corpus and language; corpus and
+  dictionary content specialize it, not code branches keyed to phrases.
+- The corpus is curated. Increasing its size or adding model-specific
+  exceptions is not an algorithmic fix.
+- Each retrieval mechanism has one responsibility and a defined output.
+- Scoring, filtering and result presentation are not additional candidate
+  discovery stages; they consume prior evidence.
+- A failure in retrieval is not an authorization to add another threshold,
+  bonus, penalty or special case. Change policy only after explicitly
+  revising its contract and testing the general effect.
+- The core retrieval contract and the quality of curated corpora are
+  evaluated independently. Application-level handling of uncertainty
+  belongs above embdex.
+
+**Implementation note:** this is the declared separation of responsibilities.
+The existing `kc_embdex_search` implementation already contains these
+retrieval mechanisms, but its acceptance and score-fusion expressions
+remain intertwined with candidate collection. The numeric weighting,
+acceptance thresholds and duplicate-ID rank penalties documented below
+are existing implementation policy, **not additional steps in LHR**.
+Consolidating them behind the single ranking-policy boundary requires
+a separately tested refactor; this declaration does not claim that the
+implementation has already been refactored.
+
 embdex retrieves independent associations using lexical, spelling, phrase,
 and semantic evidence. It returns ranked candidates for applications to
 interpret; it does not identify a single definitive intent or invoke tools.
